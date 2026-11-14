@@ -74,7 +74,7 @@ handshake.
   another alert.)
 
 * ExpectedProtocol - expected negotiated protocol. One of
-  SSLv3, TLSv1, TLSv1.1, TLSv1.2.
+  TLSv1, TLSv1.1, TLSv1.2.
 
 * SessionTicketExpected - whether or not a session ticket is expected
   - Ignore - do not check for a session ticket (default)
@@ -272,8 +272,8 @@ In the above examples, `default` is the provider to use.
 
 Note that the test expectations sometimes depend on the Configure settings. For
 example, the negotiated protocol depends on the set of available (enabled)
-protocols: a build with `enable-ssl3` has different test expectations than a
-build with `no-ssl3`.
+protocols: a build with `enable-tls1_3` has different test expectations than a
+build with `no-tls1_3`.
 
 The Perl test harness automatically generates expected outputs, so users who
 just run `make test` do not need any extra steps.
@@ -283,3 +283,14 @@ of the generated `test/ssl-tests/*.cnf` correspond to expected outputs in with
 the default Configure options. To run `ssl_test` manually from the command line
 in a build with a different configuration, you may need to generate the right
 `*.cnf` file from the `*.cnf.in` input first.
+
+Running a test manually via make
+--------------------------------
+
+Individual tests may be run by adding the SSL_TESTS variable to the `make`
+command line. The SSL_TESTS variable is set to the list of input (or ".in")
+files. The values in SSL_TESTS are globbed.
+
+    $ make test TESTS=test_ssl_new SSL_TESTS="0*.cnf.in"
+
+    $ make test TESTS=test_ssl_new SSL_TESTS="01-simple.cnf.in 05-sni.cnf.in"

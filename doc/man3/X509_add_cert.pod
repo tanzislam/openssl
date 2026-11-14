@@ -10,12 +10,13 @@ X509 certificate list addition functions
 
  #include <openssl/x509.h>
 
- int X509_add_cert(STACK_OF(X509) *sk, X509 *cert, int flags);
- int X509_add_certs(STACK_OF(X509) *sk, STACK_OF(X509) *certs, int flags);
+ int X509_add_cert(STACK_OF(X509) *sk, const X509 *cert, int flags);
+ int X509_add_certs(STACK_OF(X509) *sk, const STACK_OF(X509) *certs, int flags);
 
 =head1 DESCRIPTION
 
 X509_add_cert() adds a certificate I<cert> to the given list I<sk>.
+It is an error for the I<cert> argument to be NULL.
 
 X509_add_certs() adds a list of certificate I<certs> to the given list I<sk>.
 The I<certs> argument may be NULL, which implies no effect.
@@ -31,7 +32,7 @@ The value B<X509_ADD_FLAG_DEFAULT>, which equals 0, means no special semantics.
 If B<X509_ADD_FLAG_UP_REF> is set then
 the reference counts of those certificates added successfully are increased.
 
-If B<X509_ADD_FLAG_PREPEND> is set then the certifcates are prepended to I<sk>.
+If B<X509_ADD_FLAG_PREPEND> is set then the certificates are prepended to I<sk>.
 By default they are appended to I<sk>.
 In both cases the original order of the added certificates is preserved.
 
@@ -64,9 +65,11 @@ L<X509_self_signed(3)>
 The functions X509_add_cert() and X509_add_certs()
 were added in OpenSSL 3.0.
 
+X509_add_cert() had its cert parameter converted to be I<const> in OpenSSL 4.0.
+
 =head1 COPYRIGHT
 
-Copyright 2019-2020 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2019-2026 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

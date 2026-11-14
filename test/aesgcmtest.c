@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2019-2026 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -8,6 +8,8 @@
  */
 
 #include <openssl/evp.h>
+#include <openssl/core_names.h>
+#include <openssl/params.h>
 #include "testutil.h"
 
 static const unsigned char gcm_key[] = {
@@ -36,7 +38,7 @@ static const unsigned char gcm_tag[] = {
 };
 
 static int do_encrypt(unsigned char *iv_gen, unsigned char *ct, int *ct_len,
-                      unsigned char *tag, int *tag_len)
+    unsigned char *tag, int *tag_len)
 {
     int ret = 0;
     EVP_CIPHER_CTX *ctx = NULL;
@@ -45,26 +47,31 @@ static int do_encrypt(unsigned char *iv_gen, unsigned char *ct, int *ct_len,
 
     *tag_len = 16;
     ret = TEST_ptr(ctx = EVP_CIPHER_CTX_new())
-          && TEST_true(EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL,
-                                          NULL) > 0)
-          && TEST_true(EVP_EncryptInit_ex(ctx, NULL, NULL, gcm_key,
-                                          iv_gen != NULL ? NULL : gcm_iv) > 0)
-          && TEST_true(EVP_EncryptUpdate(ctx, NULL, &outlen, gcm_aad,
-                                         sizeof(gcm_aad)) > 0)
-          && TEST_true(EVP_EncryptUpdate(ctx, ct, ct_len, gcm_pt,
-                                         sizeof(gcm_pt)) > 0)
-          && TEST_true(EVP_EncryptFinal_ex(ctx, outbuf, &outlen) > 0)
-          && TEST_int_eq(EVP_CIPHER_CTX_get_tag_length(ctx), 16)
-          && TEST_true(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16,
-                                           tag) > 0)
-          && TEST_true(iv_gen == NULL
-                  || EVP_CIPHER_CTX_get_original_iv(ctx, iv_gen, 12));
+        && TEST_true(EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL,
+                         NULL)
+            > 0)
+        && TEST_true(EVP_EncryptInit_ex(ctx, NULL, NULL, gcm_key,
+                         iv_gen != NULL ? NULL : gcm_iv)
+            > 0)
+        && TEST_true(EVP_EncryptUpdate(ctx, NULL, &outlen, gcm_aad,
+                         sizeof(gcm_aad))
+            > 0)
+        && TEST_true(EVP_EncryptUpdate(ctx, ct, ct_len, gcm_pt,
+                         sizeof(gcm_pt))
+            > 0)
+        && TEST_true(EVP_EncryptFinal_ex(ctx, outbuf, &outlen) > 0)
+        && TEST_int_eq(EVP_CIPHER_CTX_get_tag_length(ctx), 16)
+        && TEST_true(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16,
+                         tag)
+            > 0)
+        && TEST_true(iv_gen == NULL
+            || EVP_CIPHER_CTX_get_original_iv(ctx, iv_gen, 12));
     EVP_CIPHER_CTX_free(ctx);
     return ret;
 }
 
 static int do_decrypt(const unsigned char *iv, const unsigned char *ct,
-                      int ct_len, const unsigned char *tag, int tag_len)
+    int ct_len, const unsigned char *tag, int tag_len)
 {
     int ret = 0;
     EVP_CIPHER_CTX *ctx = NULL;
@@ -73,18 +80,22 @@ static int do_decrypt(const unsigned char *iv, const unsigned char *ct,
     unsigned char outbuf[32];
 
     ret = TEST_ptr(ctx = EVP_CIPHER_CTX_new())
-              && TEST_true(EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL,
-                                              NULL, NULL) > 0)
-              && TEST_true(EVP_DecryptInit_ex(ctx, NULL, NULL, gcm_key, iv) > 0)
-              && TEST_int_eq(EVP_CIPHER_CTX_get_tag_length(ctx), 16)
-              && TEST_true(EVP_DecryptUpdate(ctx, NULL, &outlen, gcm_aad,
-                                             sizeof(gcm_aad)) > 0)
-              && TEST_true(EVP_DecryptUpdate(ctx, pt, &ptlen, ct,
-                                             ct_len) > 0)
-              && TEST_true(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG,
-                                               tag_len, (void *)tag) > 0)
-              && TEST_true(EVP_DecryptFinal_ex(ctx, outbuf, &outlen) > 0)
-              && TEST_mem_eq(gcm_pt, sizeof(gcm_pt), pt, ptlen);
+        && TEST_true(EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL,
+                         NULL, NULL)
+            > 0)
+        && TEST_true(EVP_DecryptInit_ex(ctx, NULL, NULL, gcm_key, iv) > 0)
+        && TEST_int_eq(EVP_CIPHER_CTX_get_tag_length(ctx), 16)
+        && TEST_true(EVP_DecryptUpdate(ctx, NULL, &outlen, gcm_aad,
+                         sizeof(gcm_aad))
+            > 0)
+        && TEST_true(EVP_DecryptUpdate(ctx, pt, &ptlen, ct,
+                         ct_len)
+            > 0)
+        && TEST_true(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG,
+                         tag_len, (void *)tag)
+            > 0)
+        && TEST_true(EVP_DecryptFinal_ex(ctx, outbuf, &outlen) > 0)
+        && TEST_mem_eq(gcm_pt, sizeof(gcm_pt), pt, ptlen);
 
     EVP_CIPHER_CTX_free(ctx);
     return ret;
@@ -97,9 +108,9 @@ static int kat_test(void)
     int ctlen = 0, taglen = 0;
 
     return do_encrypt(NULL, ct, &ctlen, tag, &taglen)
-           && TEST_mem_eq(gcm_ct, sizeof(gcm_ct), ct, ctlen)
-           && TEST_mem_eq(gcm_tag, sizeof(gcm_tag), tag, taglen)
-           && do_decrypt(gcm_iv, ct, ctlen, tag, taglen);
+        && TEST_mem_eq(gcm_ct, sizeof(gcm_ct), ct, ctlen)
+        && TEST_mem_eq(gcm_tag, sizeof(gcm_tag), tag, taglen)
+        && do_decrypt(gcm_iv, ct, ctlen, tag, taglen);
 }
 
 static int badkeylen_test(void)
@@ -109,14 +120,13 @@ static int badkeylen_test(void)
     const EVP_CIPHER *cipher;
 
     ret = TEST_ptr(cipher = EVP_aes_192_gcm())
-          && TEST_ptr(ctx = EVP_CIPHER_CTX_new())
-          && TEST_true(EVP_EncryptInit_ex(ctx, cipher, NULL, NULL, NULL))
-          && TEST_false(EVP_CIPHER_CTX_set_key_length(ctx, 2));
+        && TEST_ptr(ctx = EVP_CIPHER_CTX_new())
+        && TEST_true(EVP_EncryptInit_ex(ctx, cipher, NULL, NULL, NULL))
+        && TEST_int_le(EVP_CIPHER_CTX_set_key_length(ctx, 2), 0);
     EVP_CIPHER_CTX_free(ctx);
     return ret;
 }
 
-#ifdef FIPS_MODULE
 static int ivgen_test(void)
 {
     unsigned char iv_gen[16];
@@ -125,16 +135,73 @@ static int ivgen_test(void)
     int ctlen = 0, taglen = 0;
 
     return do_encrypt(iv_gen, ct, &ctlen, tag, &taglen)
-           && do_decrypt(iv_gen, ct, ctlen, tag, taglen);
+        && do_decrypt(iv_gen, ct, ctlen, tag, taglen);
 }
-#endif /* FIPS_MODULE */
+
+/*
+ * inl > ctx->ivlen makes setivinv() compute ctx->iv + ctx->ivlen - inl,
+ * which wraps, and inl == 0 points past the IV.  Both are rejected.
+ */
+static int setivinv_bounds_test(void)
+{
+    int ret = 0;
+    EVP_CIPHER_CTX *ctx = NULL;
+    EVP_CIPHER *cipher = NULL;
+    unsigned char key[32] = { 0 };
+    unsigned char fixed_iv[4] = { 0x01, 0x02, 0x03, 0x04 };
+    unsigned char big_ivinv[64];
+    unsigned char exact_ivinv[12];
+    OSSL_PARAM params[2];
+
+    memset(big_ivinv, 'A', sizeof(big_ivinv));
+    memset(exact_ivinv, 'B', sizeof(exact_ivinv));
+
+    if (!TEST_ptr(ctx = EVP_CIPHER_CTX_new())
+        || !TEST_ptr(cipher = EVP_CIPHER_fetch(NULL, "AES-256-GCM", NULL)))
+        goto err;
+
+    if (!TEST_true(EVP_DecryptInit_ex2(ctx, cipher, key, NULL, NULL)))
+        goto err;
+
+    if (!TEST_true(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IV_FIXED,
+            (int)sizeof(fixed_iv), fixed_iv)))
+        goto err;
+
+    /* --- Negative: inl == 0 must be rejected --- */
+    params[0] = OSSL_PARAM_construct_octet_string(
+        OSSL_CIPHER_PARAM_AEAD_TLS1_SET_IV_INV, big_ivinv, 0);
+    params[1] = OSSL_PARAM_construct_end();
+    if (!TEST_false(EVP_CIPHER_CTX_set_params(ctx, params)))
+        goto err;
+
+    /* --- Negative: inl > ivlen (64 > 12) must be rejected --- */
+    params[0] = OSSL_PARAM_construct_octet_string(
+        OSSL_CIPHER_PARAM_AEAD_TLS1_SET_IV_INV,
+        big_ivinv, sizeof(big_ivinv));
+    params[1] = OSSL_PARAM_construct_end();
+    if (!TEST_false(EVP_CIPHER_CTX_set_params(ctx, params)))
+        goto err;
+
+    /* --- Positive: inl == ivlen (12 == 12) must be accepted --- */
+    params[0] = OSSL_PARAM_construct_octet_string(
+        OSSL_CIPHER_PARAM_AEAD_TLS1_SET_IV_INV,
+        exact_ivinv, sizeof(exact_ivinv));
+    params[1] = OSSL_PARAM_construct_end();
+    if (!TEST_true(EVP_CIPHER_CTX_set_params(ctx, params)))
+        goto err;
+
+    ret = 1;
+err:
+    EVP_CIPHER_CTX_free(ctx);
+    EVP_CIPHER_free(cipher);
+    return ret;
+}
 
 int setup_tests(void)
 {
     ADD_TEST(kat_test);
     ADD_TEST(badkeylen_test);
-#ifdef FIPS_MODULE
     ADD_TEST(ivgen_test);
-#endif /* FIPS_MODULE */
+    ADD_TEST(setivinv_bounds_test);
     return 1;
 }

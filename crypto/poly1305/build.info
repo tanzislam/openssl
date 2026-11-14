@@ -2,10 +2,10 @@ LIBS=../../libcrypto
 
 $POLY1305ASM=
 IF[{- !$disabled{asm} -}]
-  $POLY1305ASM_x86=poly1305-x86.s
+  $POLY1305ASM_x86=poly1305-x86.S
   $POLY1305ASM_x86_64=poly1305-x86_64.s
 
-  $POLY1305ASM_ia64=asm/poly1305-ia64.S
+  $POLY1305ASM_ia64=poly1305-ia64.s
 
   $POLY1305ASM_sparcv9=poly1305-sparcv9.S
 
@@ -14,7 +14,7 @@ IF[{- !$disabled{asm} -}]
   $POLY1305ASM_s390x=poly1305-s390x.S
 
   $POLY1305ASM_armv4=poly1305-armv4.S
-  $POLY1305ASM_aarch64=poly1305-armv8.S
+  $POLY1305ASM_aarch64=poly1305-armv8.S poly1305-armv9-sve2.S
 
   $POLY1305ASM_ppc32=poly1305_ppc.c poly1305-ppc.s poly1305-ppcfp.s
   $POLY1305ASM_ppc64=$POLY1305ASM_ppc32
@@ -34,17 +34,21 @@ SOURCE[../../libcrypto]=poly1305.c $POLY1305ASM
 # Implementations are now spread across several libraries, so the defines
 # need to be applied to all affected libraries and modules.
 DEFINE[../../libcrypto]=$POLY1305DEF
+DEFINE[../../providers/libdefault.a]=$POLY1305DEF
 
 GENERATE[poly1305-sparcv9.S]=asm/poly1305-sparcv9.pl
 INCLUDE[poly1305-sparcv9.o]=..
-GENERATE[poly1305-x86.s]=asm/poly1305-x86.pl
+GENERATE[poly1305-x86.S]=asm/poly1305-x86.pl
 GENERATE[poly1305-x86_64.s]=asm/poly1305-x86_64.pl
+GENERATE[poly1305-ia64.s]=asm/poly1305-ia64.S
 GENERATE[poly1305-ppc.s]=asm/poly1305-ppc.pl
 GENERATE[poly1305-ppcfp.s]=asm/poly1305-ppcfp.pl
 GENERATE[poly1305-armv4.S]=asm/poly1305-armv4.pl
 INCLUDE[poly1305-armv4.o]=..
 GENERATE[poly1305-armv8.S]=asm/poly1305-armv8.pl
+GENERATE[poly1305-armv9-sve2.S]=asm/poly1305-armv9-sve2.pl
 INCLUDE[poly1305-armv8.o]=..
+INCLUDE[poly1305-armv9-sve2.o]=..
 GENERATE[poly1305-mips.S]=asm/poly1305-mips.pl
 INCLUDE[poly1305-mips.o]=..
 GENERATE[poly1305-c64xplus.S]=asm/poly1305-c64xplus.pl

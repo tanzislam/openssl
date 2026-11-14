@@ -10,7 +10,7 @@ DAYS=-1 ./mkcert.sh genroot "Root CA" root-key root-expired
 # cross root and root cross cert
 ./mkcert.sh genroot "Cross Root" cross-key cross-root
 ./mkcert.sh genca "Root CA" root-key root-cross-cert cross-key cross-root
-# trust variants: +serverAuth -serverAuth +clientAuth -clientAuth,
+# trust variants: +serverAuth -serverAuth +clientAuth -clientAuth
 openssl x509 -in root-cert.pem -trustout \
     -addtrust serverAuth -out root+serverAuth.pem
 openssl x509 -in root-cert.pem -trustout \
@@ -79,13 +79,46 @@ openssl x509 -in sroot-cert.pem -trustout \
 
 # Primary intermediate ca: ca-cert
 ./mkcert.sh genca "CA" ca-key ca-cert root-key root-cert
-# ca variants: CA:false, key2, DN2, issuer2, expired
+# ca variants: CA:false, no bc, key2, DN2, issuer2, expired
 ./mkcert.sh genee "CA" ca-key ca-nonca root-key root-cert
 ./mkcert.sh gen_nonbc_ca "CA" ca-key ca-nonbc root-key root-cert
 ./mkcert.sh genca "CA" ca-key2 ca-cert2 root-key root-cert
 ./mkcert.sh genca "CA2" ca-key ca-name2 root-key root-cert
 ./mkcert.sh genca "CA" ca-key ca-root2 root-key2 root-cert2
 DAYS=-1 ./mkcert.sh genca "CA" ca-key ca-expired root-key root-cert
+# CA key rollover chain: a self-issued transition certificate carries the
+# new CA key (ca-key) but is signed by the old key (root-key), so its SKID
+# differs from its AKID keyIdentifier and it must not be classified as
+# self-signed.  The old root reuses root-key, the leaf ee-key.  Explicit
+# serials 1000-1002 keep the same-named issuers of these certificates
+# distinct for X509_STORE lookups.
+./mkcert.sh req root-key "CN = Test Rollover CA" |
+    openssl x509 -req -sha256 -signkey root-key.pem -set_serial 1000 \
+        -not_before 20200101000000Z -days 36525 -out rollover-root.pem \
+        -extfile <(printf "%s\n" \
+            "basicConstraints = critical,CA:true" \
+            "keyUsage = keyCertSign,cRLSign" \
+            "subjectKeyIdentifier = hash" \
+            "authorityKeyIdentifier = keyid")
+./mkcert.sh req ca-key "CN = Test Rollover CA" |
+    openssl x509 -req -sha256 -CA rollover-root.pem -CAkey root-key.pem \
+        -set_serial 1001 -not_before 20200101000000Z -days 36525 \
+        -out rollover-ca.pem \
+        -extfile <(printf "%s\n" \
+            "basicConstraints = critical,CA:true" \
+            "keyUsage = keyCertSign,cRLSign" \
+            "subjectKeyIdentifier = hash" \
+            "authorityKeyIdentifier = keyid")
+./mkcert.sh req ee-key "CN = Test Rollover EE" |
+    openssl x509 -req -sha256 -CA rollover-ca.pem -CAkey ca-key.pem \
+        -set_serial 1002 -not_before 20200101000000Z -days 36525 \
+        -out rollover-ee.pem \
+        -extfile <(printf "%s\n" \
+            "basicConstraints = critical,CA:false" \
+            "keyUsage = digitalSignature,keyEncipherment" \
+            "extendedKeyUsage = serverAuth,clientAuth" \
+            "subjectKeyIdentifier = hash" \
+            "authorityKeyIdentifier = keyid")
 # trust variants: +serverAuth, -serverAuth, +clientAuth, -clientAuth
 openssl x509 -in ca-cert.pem -trustout \
     -addtrust serverAuth -out ca+serverAuth.pem
@@ -158,10 +191,13 @@ openssl x509 -in sca-cert.pem -trustout \
 ./mkcert.sh genee server.example ee-key ee-cert ca-key ca-cert
 # ee variants: expired, issuer-key2, issuer-name2, bad-pathlen
 ./mkcert.sh genee server.example ee-key ee-expired ca-key ca-cert -days -1
+./mkcert.sh genee server.example ee-key ee-expired2 ca-key ca-cert -days 3650
 ./mkcert.sh genee server.example ee-key ee-cert2 ca-key2 ca-cert2
 ./mkcert.sh genee server.example ee-key ee-name2 ca-key ca-name2
 ./mkcert.sh genee server.example ee-key ee-pathlen ca-key ca-cert \
     -extfile <(echo "basicConstraints=CA:false,pathlen:0") # bash needed here
+# ee variant: issued directly by root CA (2-level chain)
+./mkcert.sh genee server.example1 ee-key ee-cert1 root-key root-cert
 # purpose variants: clientAuth
 ./mkcert.sh genee -p clientAuth server.example ee-key ee-client ca-key ca-cert
 # trust variants: +serverAuth, -serverAuth, +clientAuth, -clientAuth
@@ -173,6 +209,25 @@ openssl x509 -in ee-client.pem -trustout \
     -addtrust clientAuth -out ee+clientAuth.pem
 openssl x509 -in ee-client.pem -trustout \
     -addreject clientAuth -out ee-clientAuth.pem
+
+# time stamping certificates
+./mkcert.sh genee -p critical,timeStamping -k critical,digitalSignature server.example ee-key ee-timestampsign-CABforum ca-key ca-cert
+./mkcert.sh genee -p timeStamping -k critical,digitalSignature server.example ee-key ee-timestampsign-CABforum-noncritxku ca-key ca-cert
+./mkcert.sh genee -p critical,timeStamping,serverAuth -k critical,digitalSignature server.example ee-key ee-timestampsign-CABforum-serverauth ca-key ca-cert
+./mkcert.sh genee -p critical,timeStamping,2.5.29.37.0 -k critical,digitalSignature server.example ee-key ee-timestampsign-CABforum-anyextkeyusage ca-key ca-cert
+./mkcert.sh genee -p critical,timeStamping -k critical,digitalSignature,cRLSign server.example ee-key ee-timestampsign-CABforum-crlsign ca-key ca-cert
+./mkcert.sh genee -p critical,timeStamping -k critical,digitalSignature,keyCertSign server.example ee-key ee-timestampsign-CABforum-keycertsign ca-key ca-cert
+./mkcert.sh genee -p critical,timeStamping server.example ee-key ee-timestampsign-rfc3161 ca-key ca-cert
+./mkcert.sh genee -p timeStamping server.example ee-key ee-timestampsign-rfc3161-noncritxku ca-key ca-cert
+./mkcert.sh genee -p critical,timeStamping -k digitalSignature server.example ee-key ee-timestampsign-rfc3161-digsig ca-key ca-cert
+
+# code signing certificate
+./mkcert.sh genee -p codeSigning -k critical,digitalSignature server.example ee-key ee-codesign ca-key ca-cert
+./mkcert.sh genee -p codeSigning,serverAuth -k critical,digitalSignature server.example ee-key ee-codesign-serverauth ca-key ca-cert
+./mkcert.sh genee -p codeSigning,2.5.29.37.0 -k critical,digitalSignature server.example ee-key ee-codesign-anyextkeyusage ca-key ca-cert
+./mkcert.sh genee -p codeSigning -k critical,digitalSignature,cRLSign server.example ee-key ee-codesign-crlsign ca-key ca-cert
+./mkcert.sh genee -p codeSigning -k critical,digitalSignature,keyCertSign server.example ee-key ee-codesign-keycertsign ca-key ca-cert
+./mkcert.sh genee -p codeSigning -k digitalSignature server.example ee-key ee-codesign-noncritical ca-key ca-cert
 
 # Leaf cert security level variants
 # MD5 issuer signature
@@ -204,8 +259,14 @@ OPENSSL_KEYBITS=4096 \
 OPENSSL_KEYBITS=8192 \
 ./mkcert.sh genee server.example ee-key-8192 ee-cert-8192 ca-key ca-cert
 
+# root CA cert with explicit keyUsage not including KeyCertSign
+openssl req -new -x509 -key root-key.pem -subj /CN="Root CA" -out root-no-KeyCertSign.pem -addext keyUsage=digitalSignature -days 36525
 # self-signed end-entity cert with explicit keyUsage not including KeyCertSign
 openssl req -new -x509 -key ee-key.pem -subj /CN=ee-self-signed -out ee-self-signed.pem -addext keyUsage=digitalSignature -days 36525
+
+# self-signed end-entity cert signed with RSA-PSS
+openssl req -new -x509 -key ee-key.pem -subj /CN=ee-self-signed-pss -out ee-self-signed-pss.pem -days 36525 \
+    -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:digest
 
 # Proxy certificates, off of ee-client
 # Start with some good ones
@@ -281,6 +342,12 @@ NC=$NC ./mkcert.sh genca "Test NC sub CA" ncca3-key ncca3-cert \
     "3.CN=not..dns" "4.CN=not@dns" "5.CN=not-.dns" "6.CN=not.dns." | \
     ./mkcert.sh geneealt goodcn1-key goodcn1-cert ncca1-key ncca1-cert \
     "IP = 127.0.0.1" "IP = 192.168.0.1"
+
+# all DNS-like CNs allowed by CA1, no SANs
+
+./mkcert.sh req goodcn2-key "O = Good NC Test Certificate 1" \
+    "CN=www.good.org" | \
+    ./mkcert.sh geneeconfig goodcn2-key goodcn2-cert ncca1-key ncca1-cert
 
 # Some DNS-like CNs not permitted by CA1, no DNS SANs.
 
@@ -382,6 +449,29 @@ REQMASK=MASK:0x800 ./mkcert.sh req badalt7-key "O = Bad NC Test Certificate 7" \
     "email.1 = good@good.org" "email.2 = any@good.com" \
     "IP = 127.0.0.1" "IP = 192.168.0.1"
 
+# NC CA4 only permits URIs matching good.org.
+
+NC="permitted;URI:good.org"
+NC=$NC ./mkcert.sh genca "Test NC CA 4" ncca4-key ncca4-cert root-key root-cert
+
+# A certificate with an URI SAN
+./mkcert.sh req alt1-key "O = Good NC Test Certificate 1" \
+    "CN=Joe Bloggs" | \
+    ./mkcert.sh geneealt nc-uri-key nc-uri-cert ncca4-key ncca4-cert \
+    "URI.1 = foo://%40something@good.org" \
+    "URI.2 = bar://other@good.org/baz/quux"
+
+# Certs for CVE-2022-4203 testcase
+
+NC="excluded;otherName:SRVName;UTF8STRING:foo@example.org" ./mkcert.sh genca \
+    "Test NC CA othername" nccaothername-key nccaothername-cert \
+    root-key root-cert
+
+./mkcert.sh req alt-email-key "O = NC email in othername Test Certificate" | \
+    ./mkcert.sh geneealt bad-othername-key bad-othername-cert \
+    nccaothername-key nccaothername-cert \
+    "otherName.1 = SRVName;UTF8STRING:foo@example.org"
+
 # RSA-PSS signatures
 # SHA1
 ./mkcert.sh genee PSS-SHA1 ee-key ee-pss-sha1-cert ca-key ca-cert \
@@ -407,6 +497,12 @@ openssl req -new -noenc -subj "/CN=localhost" \
     ./mkcert.sh geneenocsr "Server RSA-PSS restricted cert" \
     server-pss-restrict-cert rootkey rootcert
 
+openssl req -new -noenc -subj "/CN=Client-RSA-PSS" \
+    -newkey rsa-pss -keyout client-pss-restrict-key.pem \
+    -pkeyopt rsa_pss_keygen_md:sha256 -pkeyopt rsa_pss_keygen_saltlen:32 | \
+    ./mkcert.sh geneenocsr -p clientAuth "Client RSA-PSS restricted cert" \
+    client-pss-restrict-cert rootkey rootcert
+
 # CT entry
 ./mkcert.sh genct server.example embeddedSCTs1-key embeddedSCTs1 embeddedSCTs1_issuer-key embeddedSCTs1_issuer ct-server-key
 
@@ -423,3 +519,57 @@ OPENSSL_SIGALG=ED448 OPENSSL_KEYALG=ed448 ./mkcert.sh genee ed448 \
 
 # critical id-pkix-ocsp-no-check extension
 ./mkcert.sh geneeextra server.example ee-key ee-cert-ocsp-nocheck ca-key ca-cert "1.3.6.1.5.5.7.48.1.5=critical,DER:05:00"
+
+# certificatePolicies extension
+./mkcert.sh genca -c "1.3.6.1.4.1.16604.998855.1" "CA" ca-key ca-pol-cert root-key root-cert
+./mkcert.sh geneeextra server.example ee-key ee-cert-policies ca-key ca-cert "certificatePolicies=1.3.6.1.4.1.16604.998855.1"
+# We can create a cert with a duplicate policy oid - but its actually invalid!
+./mkcert.sh geneeextra server.example ee-key ee-cert-policies-bad ca-key ca-cert "certificatePolicies=1.3.6.1.4.1.16604.998855.1,1.3.6.1.4.1.16604.998855.1"
+
+# EC cert signed by curve ca with SHA3-224, SHA3-256, SHA3-384, SHA3-512
+OPENSSL_SIGALG="sha3-224" ./mkcert.sh genee server.example ee-key-ec-named-named ee-cert-ec-sha3-224 ca-key-ec-named ca-cert-ec-named
+OPENSSL_SIGALG="sha3-256" ./mkcert.sh genee server.example ee-key-ec-named-named ee-cert-ec-sha3-256 ca-key-ec-named ca-cert-ec-named
+OPENSSL_SIGALG="sha3-384" ./mkcert.sh genee server.example ee-key-ec-named-named ee-cert-ec-sha3-384 ca-key-ec-named ca-cert-ec-named
+OPENSSL_SIGALG="sha3-512" ./mkcert.sh genee server.example ee-key-ec-named-named ee-cert-ec-sha3-512 ca-key-ec-named ca-cert-ec-named
+
+# DSA roots and EE certs: id-dsa-with-sha384 / id-dsa-with-sha512
+# (regression for https://github.com/openssl/openssl/issues/30432)
+_DSA_CERT_DIR=$(cd "$(dirname "$0")" && pwd)
+(
+    set -e
+    d=$(mktemp -d)
+    trap 'rm -rf "$d"' EXIT
+    cd "$d"
+    openssl dsaparam -out dsap.pem 2048
+    openssl gendsa -out ca384k.pem dsap.pem
+    openssl req -new -x509 -key ca384k.pem -sha384 -out root-cert-dsa-sha384.pem \
+        -days 3650 -subj "/CN=OpenSSL Test DSA SHA-384 Root" -nodes
+    openssl gendsa -out ee384k.pem dsap.pem
+    openssl req -new -key ee384k.pem -out ee384.csr \
+        -subj "/CN=OpenSSL Test DSA SHA-384 EE"
+    openssl x509 -req -in ee384.csr -CA root-cert-dsa-sha384.pem -CAkey ca384k.pem \
+        -CAcreateserial -out ee-cert-dsa-sha384.pem -days 3650 -sha384
+    openssl gendsa -out ca512k.pem dsap.pem
+    openssl req -new -x509 -key ca512k.pem -sha512 -out root-cert-dsa-sha512.pem \
+        -days 3650 -subj "/CN=OpenSSL Test DSA SHA-512 Root" -nodes
+    openssl gendsa -out ee512k.pem dsap.pem
+    openssl req -new -key ee512k.pem -out ee512.csr \
+        -subj "/CN=OpenSSL Test DSA SHA-512 EE"
+    openssl x509 -req -in ee512.csr -CA root-cert-dsa-sha512.pem -CAkey ca512k.pem \
+        -CAcreateserial -out ee-cert-dsa-sha512.pem -days 3650 -sha512
+    cp root-cert-dsa-sha384.pem ee-cert-dsa-sha384.pem \
+        root-cert-dsa-sha512.pem ee-cert-dsa-sha512.pem \
+        "$_DSA_CERT_DIR"
+)
+unset _DSA_CERT_DIR
+
+# EC end-entity cert signed by RSA intermediate CA
+OPENSSL_KEYALG=ec OPENSSL_KEYBITS=prime256v1 ./mkcert.sh genee \
+    "P-256 cert EE issuer" p256-ee-rsa-ca-key \
+    p256-ee-rsa-ca-cert ca-key ca-cert
+
+# Mixed chain: RSA root -> ECC intermediate CA -> RSA end entity
+OPENSSL_KEYALG=ec OPENSSL_KEYBITS=prime256v1 ./mkcert.sh genca \
+    "ECC CA" mixed-ca-key mixed-ca-cert root-key root-cert
+OPENSSL_KEYALG=rsa OPENSSL_KEYBITS=2048 ./mkcert.sh genee \
+    "server mixed ECC/RSA" mixed-ee-key mixed-ee-cert mixed-ca-key mixed-ca-cert

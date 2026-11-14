@@ -1,5 +1,5 @@
 /*
- * Copyright 2006-2020 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2006-2022 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -36,7 +36,14 @@ static int sigx_cmp(const nid_triple *const *a, const nid_triple *const *b)
     int ret;
 
     ret = (*a)->hash_id - (*b)->hash_id;
-    if (ret != 0)
+    /* The "b" side of the comparison carries the algorithms already
+     * registered. A NID_undef for 'hash_id' there means that the
+     * signature algorithm doesn't need a digest to operate OK. In
+     * such case, any hash_id/digest algorithm on the test side (a),
+     * incl. NID_undef, is acceptable. signature algorithm NID
+     * (pkey_id) must match in any case.
+     */
+    if ((ret != 0) && ((*b)->hash_id != NID_undef))
         return ret;
     return (*a)->pkey_id - (*b)->pkey_id;
 }
@@ -57,7 +64,7 @@ static ossl_inline int obj_sig_init(void)
 }
 
 static int ossl_obj_find_sigid_algs(int signid, int *pdig_nid, int *ppkey_nid,
-                                    int lock)
+    int lock)
 {
     nid_triple tmp;
     const nid_triple *rv;
@@ -105,7 +112,8 @@ int OBJ_find_sigid_by_algs(int *psignid, int dig_nid, int pkey_nid)
     const nid_triple **rv;
     int idx;
 
-    if (dig_nid == NID_undef || pkey_nid == NID_undef)
+    /* permitting searches for sig algs without digest: */
+    if (pkey_nid == NID_undef)
         return 0;
 
     tmp.hash_id = dig_nid;
@@ -141,16 +149,14 @@ int OBJ_add_sigid(int signid, int dig_id, int pkey_id)
     nid_triple *ntr;
     int dnid = NID_undef, pnid = NID_undef, ret = 0;
 
-    if (signid == NID_undef || dig_id == NID_undef || pkey_id == NID_undef)
+    if (signid == NID_undef || pkey_id == NID_undef)
         return 0;
 
     if (!obj_sig_init())
         return 0;
 
-    if ((ntr = OPENSSL_malloc(sizeof(*ntr))) == NULL) {
-        ERR_raise(ERR_LIB_OBJ, ERR_R_MALLOC_FAILURE);
+    if ((ntr = OPENSSL_malloc(sizeof(*ntr))) == NULL)
         return 0;
-    }
     ntr->sign_id = signid;
     ntr->hash_id = dig_id;
     ntr->pkey_id = pkey_id;
@@ -185,7 +191,7 @@ int OBJ_add_sigid(int signid, int dig_id, int pkey_id)
     if (!sk_nid_triple_push(sig_app, ntr))
         goto err;
     if (!sk_nid_triple_push(sigx_app, ntr)) {
-        ntr = NULL;             /* This is referenced by sig_app still */
+        ntr = NULL; /* This is referenced by sig_app still */
         goto err;
     }
 
@@ -194,7 +200,7 @@ int OBJ_add_sigid(int signid, int dig_id, int pkey_id)
 
     ntr = NULL;
     ret = 1;
- err:
+err:
     OPENSSL_free(ntr);
     CRYPTO_THREAD_unlock(sig_lock);
     return ret;

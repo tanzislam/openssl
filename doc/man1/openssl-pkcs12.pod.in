@@ -7,6 +7,8 @@ openssl-pkcs12 - PKCS#12 file command
 
 =head1 SYNOPSIS
 
+=for openssl duplicate options
+
 B<openssl> B<pkcs12>
 [B<-help>]
 [B<-passin> I<arg>]
@@ -19,7 +21,7 @@ B<openssl> B<pkcs12>
 [B<-nocerts>]
 [B<-noout>]
 [B<-legacy>]
-{- $OpenSSL::safe::opt_engine_synopsis -}{- $OpenSSL::safe::opt_provider_synopsis -}
+{- $OpenSSL::safe::opt_provider_synopsis -}
 {- $OpenSSL::safe::opt_r_synopsis -}
 
 PKCS#12 input (parsing) options:
@@ -42,6 +44,7 @@ PKCS#12 input (parsing) options:
 [B<-idea>]
 [B<-noenc>]
 [B<-nodes>]
+[B<-noversioncheck>]
 
 PKCS#12 output (export) options:
 
@@ -62,11 +65,15 @@ PKCS#12 output (export) options:
 [B<-certpbe> I<cipher>]
 [B<-descert>]
 [B<-macalg> I<digest>]
+[B<-pbmac1_pbkdf2>]
+[B<-pbmac1_pbkdf2_md> I<digest>]
 [B<-iter> I<count>]
 [B<-noiter>]
 [B<-nomaciter>]
 [B<-maciter>]
+[B<-macsaltlen>]
 [B<-nomac>]
+[B<-jdktrust> I<usage>]
 
 =head1 DESCRIPTION
 
@@ -98,14 +105,19 @@ Print out a usage message.
 
 =item B<-passin> I<arg>
 
-The password source for the input, and for encrypting any private keys that
-are output.
+The password source for input files. With B<-export>, it is used to decrypt
+the input private key. Otherwise, it is the password for the input PKCS#12
+file.
 For more information about the format of B<arg>
 see L<openssl-passphrase-options(1)>.
 
 =item B<-passout> I<arg>
 
-The password source for output files.
+The password source for output files. With B<-export>, it is the password for
+the output PKCS#12 file. Otherwise, it is used to encrypt any private keys that
+are output.
+For more information about the format of B<arg>
+see L<openssl-passphrase-options(1)>.
 
 =item B<-password> I<arg>
 
@@ -132,6 +144,11 @@ No certificates will be output.
 This option inhibits all credentials output,
 and so the input is just verified.
 
+=item B<-noversioncheck>
+
+This option disables checking of the version information.
+This should not be required, but is supplied for backwards compatibility.
+
 =item B<-legacy>
 
 Use legacy mode of operation and automatically load the legacy provider.
@@ -146,8 +163,6 @@ in the build. The default algorithm for private key encryption is 3DES_CBC.
 If the legacy option is not specified, then the legacy provider is not loaded
 and the default encryption algorithm for both certificates and private keys is
 AES_256_CBC with PBKDF2 for key derivation.
-
-{- $OpenSSL::safe::opt_engine_item -}
 
 {- $OpenSSL::safe::opt_provider_item -}
 
@@ -170,7 +185,7 @@ see the L</PKCS#12 output (export) options> section.
 =item B<-out> I<filename>
 
 The filename to write certificates and private keys to, standard output by
-default.  They are all written in PEM format.
+default. They are all written in PEM format.
 
 =item B<-info>
 
@@ -241,20 +256,16 @@ by default.
 
 This specifies the input filename or URI.
 Standard input is used by default.
-With the B<-export> option this is a file with certificates and a key,
-or a URI that refers to a key accessed via an engine.
+With the B<-export> option this is a file with certificates and a key.
 The order of credentials in a file doesn't matter but one private key and
 its corresponding certificate should be present. If additional
 certificates are present they will also be included in the PKCS#12 output file.
 
 =item B<-inkey> I<filename>|I<uri>
 
-The private key input for PKCS12 output.
+The input filename for the private key for PKCS12 output.
 If this option is not specified then the input file (B<-in> argument) must
 contain a private key.
-If no engine is used, the argument is taken as a file.
-If the B<-engine> option is used or the URI has prefix C<org.openssl.engine:>
-then the rest of the URI is taken as key identifier for the given engine.
 
 =item B<-certfile> I<filename>
 
@@ -341,7 +352,16 @@ then both, the private key and the certificates are encrypted using triple DES.
 
 =item B<-macalg> I<digest>
 
-Specify the MAC digest algorithm. If not included SHA1 will be used.
+Specify the MAC digest algorithm. If not included SHA256 will be used.
+
+=item B<-pbmac1_pbkdf2>
+
+Use PBMAC1 with PBKDF2 for MAC protection of the PKCS#12 file.
+
+=item B<-pbmac1_pbkdf2_md> I<digest>
+
+Specify the PBKDF2 KDF digest algorithm. If not specified, SHA256 will be used.
+Unless C<-pbmac1_pbkdf2> is specified, this parameter is ignored.
 
 =item B<-iter> I<count>
 
@@ -368,11 +388,26 @@ option.
 This option is included for compatibility with previous versions, it used
 to be needed to use MAC iterations counts but they are now used by default.
 
+=item B<-macsaltlen>
+
+This option specifies the salt length in bytes for the MAC. The salt
+length should be at least 16 bytes as per NIST SP 800-132, which is
+the default value.
+
 =item B<-nomac>
 
 Do not attempt to provide the MAC integrity. This can be useful with the FIPS
 provider as the PKCS12 MAC requires PKCS12KDF which is not an approved FIPS
 algorithm and cannot be supported by the FIPS provider.
+
+=item B<-jdktrust>
+
+Export pkcs12 file in a format compatible with Java keystore usage. This option
+accepts a string parameter indicating the trust oid name to be granted to the
+certificate it is associated with.  Currently only "anyExtendedKeyUsage" is
+defined. Note that, as Java keystores do not accept PKCS12 files with both
+trusted certificates and keypairs, use of this option implies the setting of the
+B<-nokeys> option
 
 =back
 
@@ -381,6 +416,10 @@ algorithm and cannot be supported by the FIPS provider.
 Although there are a large number of options most of them are very rarely
 used. For PKCS#12 file parsing only B<-in> and B<-out> need to be used
 for PKCS#12 file creation B<-export> and B<-name> are also used.
+
+When loading using B<-in>, An error will occur if the PKCS12 macdata contains
+PBMAC1 and the related PBKDF2 parameters are missing, or if the associated
+key length is not in the range 1 to 64.
 
 If none of the B<-clcerts>, B<-cacerts> or B<-nocerts> options are present
 then all certificates will be output in the order they appear in the input
@@ -455,12 +494,17 @@ L<ossl_store-file(7)>
 
 =head1 HISTORY
 
-The B<-engine> option was deprecated in OpenSSL 3.0.
 The B<-nodes> option was deprecated in OpenSSL 3.0, too; use B<-noenc> instead.
+
+The B<-macsaltlen> option default changed from 8 to 16 bytes in OpenSSL 3.6.
+
+The B<-engine> option was removed in OpenSSL 4.0.
+
+The B<-noversioncheck> option was added in OpenSSL 4.2.
 
 =head1 COPYRIGHT
 
-Copyright 2000-2021 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2000-2026 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

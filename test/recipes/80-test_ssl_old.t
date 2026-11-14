@@ -1,5 +1,5 @@
 #! /usr/bin/env perl
-# Copyright 2015-2021 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2015-2026 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -13,7 +13,7 @@ use warnings;
 use POSIX;
 use File::Basename;
 use File::Copy;
-use OpenSSL::Test qw/:DEFAULT with bldtop_file bldtop_dir srctop_file srctop_dir cmdstr data_file/;
+use OpenSSL::Test qw/:DEFAULT with bldtop_file bldtop_dir srctop_file srctop_dir cmdstr data_file result_dir result_file/;
 use OpenSSL::Test::Utils;
 
 BEGIN {
@@ -25,10 +25,10 @@ use lib bldtop_dir('.');
 
 my $no_fips = disabled('fips') || ($ENV{NO_FIPS} // 0);
 my ($no_rsa, $no_dsa, $no_dh, $no_ec, $no_psk,
-    $no_ssl3, $no_tls1, $no_tls1_1, $no_tls1_2, $no_tls1_3,
+    $no_tls1, $no_tls1_1, $no_tls1_2, $no_tls1_3,
     $no_dtls, $no_dtls1, $no_dtls1_2, $no_ct) =
     anydisabled qw/rsa dsa dh ec psk
-                   ssl3 tls1 tls1_1 tls1_2 tls1_3
+                   tls1 tls1_1 tls1_2 tls1_3
                    dtls dtls1 dtls1_2 ct/;
 #If ec and dh are disabled then don't use TLSv1.3
 $no_tls1_3 = 1 if (!$no_tls1_3 && $no_ec && $no_dh);
@@ -38,6 +38,7 @@ my $no_anydtls = alldisabled(available_protocols("dtls"));
 plan skip_all => "No SSL/TLS/DTLS protocol is support by this OpenSSL build"
     if $no_anytls && $no_anydtls;
 
+my $dsaallow = '1';
 my $digest = "-sha1";
 my @reqcmd = ("openssl", "req");
 my @x509cmd = ("openssl", "x509", $digest);
@@ -78,9 +79,10 @@ my $client_sess="client.ss";
 # If you're adding tests here, you probably want to convert them to the
 # new format in ssl_test.c and add recipes to 80-test_ssl_new.t instead.
 plan tests =>
-   ($no_fips ? 0 : 5)     # testssl with fips provider
+   ($no_fips ? 0 : 7)     # testssl with fips provider
     + 1                   # For testss
     + 5                   # For the testssl with default provider
+    + 1                   # For security level 0 failure tests
     ;
 
 subtest 'test_ss' => sub {
@@ -103,8 +105,69 @@ if (disabled("legacy")) {
 
 testssl($Ukey, $Ucert, $CAcert, "default", $configfile);
 unless ($no_fips) {
-    testssl($Ukey, $Ucert, $CAcert, "fips",
-            srctop_file("test","fips-and-base.cnf"));
+    # Read in a text $infile and replace the regular expression in $srch with the
+    # value in $repl and output to a new file $outfile.
+    sub replace_line_file_internal {
+
+        my ($infile, $srch, $repl, $outfile) = @_;
+        my $msg;
+
+        open(my $in, "<", $infile) or return 0;
+        read($in, $msg, 1024);
+        close $in;
+
+        $msg =~ s/$srch/$repl/;
+
+        open(my $fh, ">", $outfile) or return 0;
+        print $fh $msg;
+        close $fh;
+        return 1;
+    }
+
+    # Read in the text input file $infile
+    # and replace a single Key = Value line with a new value in $value.
+    # OR remove the Key = Value line if the passed in $value is empty.
+    # and then output a new file $outfile.
+    # $key is the Key to find
+    sub replace_kv_file {
+        my ($infile, $key, $value, $outfile) = @_;
+        my $srch = qr/$key\s*=\s*\S*\n/;
+        my $rep;
+        if ($value eq "") {
+            $rep = "";
+        } else {
+           $rep = "$key = $value\n";
+        }
+        return replace_line_file_internal($infile, $srch, $rep, $outfile);
+    }
+
+    # Read in the text $input file
+    # and search for the $key and replace with $newkey
+    # and then output a new file $outfile.
+    sub replace_line_file {
+        my ($infile, $key, $newkey, $outfile) = @_;
+        my $srch = qr/$key/;
+        my $rep = "$newkey";
+        return replace_line_file_internal($infile,
+                                          $srch, $rep, $outfile);
+    }
+
+    # Rewrite the module configuration to all PKCS#1 v1.5 padding
+    my $fipsmodcfg_filename = "fipsmodule.cnf";
+    my $fipsmodcfg = bldtop_file("test", $fipsmodcfg_filename);
+    my $provconf = srctop_file("test", "fips-and-base.cnf");
+    my $provconfnew = result_file("fips-and-base-temp.cnf");
+    my $fipsmodcfgnew_filename = "fipsmodule_mod.cnf";
+    my $fipsmodcfgnew = result_file($fipsmodcfgnew_filename);
+    $ENV{OPENSSL_CONF_INCLUDE} = result_dir();
+    ok(replace_kv_file($fipsmodcfg,
+                       'rsa-pkcs15-pad-disabled', '0',
+                       $fipsmodcfgnew)
+       && replace_line_file($provconf,
+                            $fipsmodcfg_filename, $fipsmodcfgnew_filename,
+                            $provconfnew));
+
+    testssl($Ukey, $Ucert, $CAcert, "fips", $provconfnew);
 }
 
 # -----------
@@ -330,6 +393,12 @@ sub testssl {
         push @providerflags, "-provider", "legacy";
     }
 
+    $dsaallow = '1';
+    if  ($provider eq "fips") {
+        run(test(["fips_version_test", "-config", $configfile, "<3.4.0"]),
+              capture => 1, statusvar => \$dsaallow);
+    }
+
     my @ssltest = ("ssl_old_test",
                    "-s_key", $key, "-s_cert", $cert,
                    "-c_key", $key, "-c_cert", $cert,
@@ -345,47 +414,27 @@ sub testssl {
         $dsa_cert = 1;
     }
 
-
-    # plan tests => 11;
-
     subtest 'standard SSL tests' => sub {
         ######################################################################
-        plan tests => 13;
+        plan tests => 15;
 
       SKIP: {
-          skip "SSLv3 is not supported by this OpenSSL build", 4
-              if disabled("ssl3");
-
-          skip "SSLv3 is not supported by the FIPS provider", 4
-              if $provider eq "fips";
-
-          ok(run(test([@ssltest, "-bio_pair", "-ssl3"])),
-             'test sslv3 via BIO pair');
-          ok(run(test([@ssltest, "-bio_pair", "-ssl3", "-server_auth", @CA])),
-             'test sslv3 with server authentication via BIO pair');
-          ok(run(test([@ssltest, "-bio_pair", "-ssl3", "-client_auth", @CA])),
-             'test sslv3 with client authentication via BIO pair');
-          ok(run(test([@ssltest, "-bio_pair", "-ssl3", "-server_auth", "-client_auth", @CA])),
-             'test sslv3 with both server and client authentication via BIO pair');
-        }
-
-      SKIP: {
-          skip "Neither SSLv3 nor any TLS version are supported by this OpenSSL build", 1
+          skip "No TLS versions are supported by this OpenSSL build", 1
               if $no_anytls;
 
           ok(run(test([@ssltest, "-bio_pair"])),
-             'test sslv2/sslv3 via BIO pair');
+             'test via BIO pair');
         }
 
       SKIP: {
-          skip "Neither SSLv3 nor any TLS version are supported by this OpenSSL build", 8
+          skip "No TLS versions are supported by this OpenSSL build", 14
               if $no_anytls;
 
         SKIP: {
-            skip "skipping test of sslv2/sslv3 w/o (EC)DHE test", 1 if $dsa_cert;
+            skip "skipping test w/o (EC)DHE test", 1 if $dsa_cert;
 
             ok(run(test([@ssltest, "-bio_pair", "-no_dhe", "-no_ecdhe"])),
-               'test sslv2/sslv3 w/o (EC)DHE via BIO pair');
+               'test w/o (EC)DHE via BIO pair');
           }
 
         SKIP: {
@@ -393,30 +442,42 @@ sub testssl {
                 if ($no_dh);
 
             ok(run(test([@ssltest, "-bio_pair", "-dhe1024dsa", "-v"])),
-               'test sslv2/sslv3 with 1024bit DHE via BIO pair');
+               'test with 1024bit DHE via BIO pair');
           }
 
           ok(run(test([@ssltest, "-bio_pair", "-server_auth", @CA])),
-             'test sslv2/sslv3 with server authentication');
+             'test with server authentication');
           ok(run(test([@ssltest, "-bio_pair", "-client_auth", @CA])),
-             'test sslv2/sslv3 with client authentication via BIO pair');
+             'test with client authentication via BIO pair');
           ok(run(test([@ssltest, "-bio_pair", "-server_auth", "-client_auth", @CA])),
-             'test sslv2/sslv3 with both client and server authentication via BIO pair');
+             'test with both client and server authentication via BIO pair');
           ok(run(test([@ssltest, "-bio_pair", "-server_auth", "-client_auth", "-app_verify", @CA])),
-             'test sslv2/sslv3 with both client and server authentication via BIO pair and app verify');
+             'test with both client and server authentication via BIO pair and app verify');
 
         SKIP: {
-            skip "No IPv4 available on this machine", 1
+            skip "No IPv4 available on this machine", 4
                 unless !disabled("sock") && have_IPv4();
             ok(run(test([@ssltest, "-ipv4"])),
                'test TLS via IPv4');
+            ok(run(test([@ssltest, "-ipv4", "-client_ktls"])),
+               'test TLS via IPv4 + ktls(client)');
+            ok(run(test([@ssltest, "-ipv4", "-server_ktls"])),
+               'test TLS via IPv4 + ktls(server)');
+            ok(run(test([@ssltest, "-ipv4", "-client_ktls", "-server_ktls"])),
+               'test TLS via IPv4 + ktls');
           }
 
         SKIP: {
-            skip "No IPv6 available on this machine", 1
+            skip "No IPv6 available on this machine", 4
                 unless !disabled("sock") && have_IPv6();
             ok(run(test([@ssltest, "-ipv6"])),
                'test TLS via IPv6');
+            ok(run(test([@ssltest, "-ipv6", "-client_ktls"])),
+               'test TLS via IPv6 + ktls(client)');
+            ok(run(test([@ssltest, "-ipv6", "-server_ktls"])),
+               'test TLS via IPv6 + ktls(client)');
+            ok(run(test([@ssltest, "-ipv6", "-client_ktls", "-server_ktls"])),
+               'test TLS via IPv6 + ktls');
           }
         }
     };
@@ -426,7 +487,7 @@ sub testssl {
         my @exkeys = ();
         my $ciphers = '-PSK:-SRP:@SECLEVEL=0';
 
-        if (!$no_dsa) {
+        if (!$no_dsa && $dsaallow == '1') {
             push @exkeys, "-s_cert", "certD.ss", "-s_key", $Dkey;
         }
 
@@ -439,7 +500,6 @@ sub testssl {
         push @protocols, "-tls1_3" unless $no_tls1_3;
         push @protocols, "-tls1_2" unless $no_tls1_2;
         push @protocols, "-tls1" unless $no_tls1 || $provider eq "fips";
-        push @protocols, "-ssl3" unless $no_ssl3 || $provider eq "fips";
         my $protocolciphersuitecount = 0;
         my %ciphersuites = ();
         my %ciphersstatus = ();
@@ -484,7 +544,8 @@ sub testssl {
             my $flag = $protocol eq "-tls1_3" ? "" : $protocol;
             my $ciphersuites = "";
             foreach my $cipher (@{$ciphersuites{$protocol}}) {
-                if ($protocol eq "-ssl3" && $cipher =~ /ECDH/ ) {
+                if ($dsaallow == '0' && index($cipher, "DSS") != -1) {
+                    # DSA is not allowed in FIPS 140-3
                     note "*****SKIPPING $protocol $cipher";
                     ok(1);
                 } else {
@@ -505,11 +566,16 @@ sub testssl {
 
           SKIP: {
               skip "skipping dhe512 test", 1
-                  if ($no_dh);
+                  if ($no_dh || $no_ec);
 
+              # Need some explicit EC groups to suppress default support of
+              # ffdhe2048 and ffdhe3072 in the client hello, which then
+              # overrides the server's DH temp parameters from "-dh512".
+              #
               is(run(test([@ssltest,
                            "-s_cipher", "EDH",
                            "-c_cipher", 'EDH:@SECLEVEL=1',
+                           "-groups", "?P-256:?X25519:?MLKEM512",
                            "-dhe512",
                            $protocol])), 0,
                  "testing connection with weak DH, expecting failure");
@@ -517,10 +583,37 @@ sub testssl {
         }
     };
 
+    subtest 'SSL security level failure tests' => sub {
+        ######################################################################
+        plan tests => 2;
+
+      SKIP: {
+          skip "TLSv1.0 is not supported by this OpenSSL build", 1
+              if $no_tls1;
+
+          skip "TLSv1.0 is not supported by the FIPS provider", 1
+              if $provider eq "fips";
+
+          is(run(test([@ssltest, "-bio_pair", "-tls1", "-cipher", '@SECLEVEL=1'])),
+             0, 'test tls1 fails at security level 1, expecting failure');
+        }
+
+      SKIP: {
+          skip "TLSv1.1 is not supported by this OpenSSL build", 1
+              if $no_tls1_1;
+
+          skip "TLSv1.1 is not supported by the FIPS provider", 1
+              if $provider eq "fips";
+
+          is(run(test([@ssltest, "-bio_pair", "-tls1_1", "-cipher", '@SECLEVEL=1'])),
+             0, 'test tls1.1 fails at security level 1, expecting failure');
+        }
+    };
+
     subtest 'RSA/(EC)DHE/PSK tests' => sub {
         ######################################################################
 
-        plan tests => 6;
+        plan tests => 10;
 
       SKIP: {
             skip "TLSv1.0 is not supported by this OpenSSL build", 6
@@ -557,7 +650,7 @@ sub testssl {
 
             ok(run(test([@ssltest, "-bio_pair", "-tls1", "-cipher", "PSK", "-psk", "abc123"])),
                'test tls1 with PSK via BIO pair');
-	  }
+          }
 
         SKIP: {
             skip "skipping auto DH PSK tests", 1
@@ -565,6 +658,43 @@ sub testssl {
 
             ok(run(test(['ssl_old_test', '-psk', '0102030405', '-cipher', '@SECLEVEL=2:DHE-PSK-AES128-CCM'])),
                'test auto DH meets security strength');
+          }
+	}
+
+      SKIP: {
+            skip "TLSv1.2 is not supported by this OpenSSL build", 4
+                if $no_tls1_2;
+
+        SKIP: {
+            skip "skipping auto DHE PSK test at SECLEVEL 3", 1
+                if ($no_dh || $no_psk);
+
+            ok(run(test(['ssl_old_test', '-tls1_2', '-dhe4096', '-psk', '0102030405', '-cipher', '@SECLEVEL=3:DHE-PSK-AES256-CBC-SHA384'])),
+               'test auto DHE PSK meets security strength');
+          }
+
+        SKIP: {
+            skip "skipping auto ECDHE PSK test at SECLEVEL 3", 1
+                if ($no_ec || $no_psk);
+
+            ok(run(test(['ssl_old_test', '-tls1_2', '-no_dhe', '-psk', '0102030405', '-cipher', '@SECLEVEL=3:ECDHE-PSK-AES256-CBC-SHA384'])),
+               'test auto ECDHE PSK meets security strength');
+          }
+
+        SKIP: {
+            skip "skipping no RSA PSK at SECLEVEL 3 test", 1
+                if ($no_rsa || $no_psk);
+
+            ok(!run(test(['ssl_old_test', '-tls1_2', '-no_dhe', '-psk', '0102030405', '-cipher', '@SECLEVEL=3:RSA-PSK-AES256-CBC-SHA384'])),
+               'test auto RSA PSK does not meet security level 3 requirements (PFS)');
+          }
+
+        SKIP: {
+            skip "skipping no PSK at SECLEVEL 3 test", 1
+                if ($no_psk);
+
+            ok(!run(test(['ssl_old_test', '-tls1_2', '-no_dhe', '-psk', '0102030405', '-cipher', '@SECLEVEL=3:PSK-AES256-CBC-SHA384'])),
+               'test auto PSK does not meet security level 3 requirements (PFS)');
           }
 	}
 

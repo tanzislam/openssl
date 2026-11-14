@@ -10,6 +10,7 @@ openssl-ca - sample minimal CA application
 B<openssl> B<ca>
 [B<-help>]
 [B<-verbose>]
+[B<-quiet>]
 [B<-config> I<filename>]
 [B<-name> I<section>]
 [B<-section> I<section>]
@@ -29,12 +30,14 @@ B<openssl> B<ca>
 [B<-crlsec> I<seconds>]
 [B<-crlexts> I<section>]
 [B<-startdate> I<date>]
+[B<-not_before> I<date>]
 [B<-enddate> I<date>]
+[B<-not_after> I<date>]
 [B<-days> I<arg>]
 [B<-md> I<arg>]
 [B<-policy> I<arg>]
 [B<-keyfile> I<filename>|I<uri>]
-[B<-keyform> B<DER>|B<PEM>|B<P12>|B<ENGINE>]
+[B<-keyform> B<DER>|B<PEM>|B<P12>]
 [B<-key> I<arg>]
 [B<-passin> I<arg>]
 [B<-cert> I<file>]
@@ -52,9 +55,8 @@ B<openssl> B<ca>
 [B<-preserveDN>]
 [B<-noemailDN>]
 [B<-batch>]
-[B<-msie_hack>]
+[B<-extfile> I<file>]
 [B<-extensions> I<section>]
-[B<-extfile> I<section>]
 [B<-subj> I<arg>]
 [B<-utf8>]
 [B<-sigopt> I<nm>:I<v>]
@@ -63,13 +65,18 @@ B<openssl> B<ca>
 [B<-rand_serial>]
 [B<-multivalue-rdn>]
 {- $OpenSSL::safe::opt_r_synopsis -}
-{- $OpenSSL::safe::opt_engine_synopsis -}{- $OpenSSL::safe::opt_provider_synopsis -}
+{- $OpenSSL::safe::opt_provider_synopsis -}
 [I<certreq>...]
 
 =head1 DESCRIPTION
 
 This command emulates a CA application.
 See the B<WARNINGS> especially when considering to use it productively.
+
+It generates certificates bearing X.509 version 3.
+Unless specified otherwise,
+key identifier extensions are included as described in L<x509v3_config(5)>.
+
 It can be used to sign certificate requests (CSRs) in a variety of forms
 and generate certificate revocation lists (CRLs).
 It also maintains a text database of issued certificates and their status.
@@ -95,6 +102,11 @@ Print out a usage message.
 
 This prints extra details about the operations being performed.
 
+=item B<-quiet>
+
+This prints fewer details about the operations being performed, which may
+be handy during batch scripts or pipelines.
+
 =item B<-config> I<filename>
 
 Specifies the configuration file to use.
@@ -113,8 +125,8 @@ signed by the CA.
 
 =item B<-inform> B<DER>|B<PEM>
 
-The format of the data in certificate request input files;
-unspecified by default.
+The format to use when loading certificate request (CSR) input files;
+by default PEM is tried first.
 See L<openssl-format-options(1)> for details.
 
 =item B<-ss_cert> I<filename>
@@ -158,7 +170,7 @@ See L<openssl-format-options(1)> for details.
 The CA private key to sign certificate requests with.
 This must match with B<-cert>.
 
-=item B<-keyform> B<DER>|B<PEM>|B<P12>|B<ENGINE>
+=item B<-keyform> B<DER>|B<PEM>|B<P12>
 
 The format of the private key input file; unspecified by default.
 See L<openssl-format-options(1)> for details.
@@ -166,7 +178,8 @@ See L<openssl-format-options(1)> for details.
 =item B<-sigopt> I<nm>:I<v>
 
 Pass options to the signature algorithm during sign operations.
-Names and values of these options are algorithm-specific.
+Names and values of these options are algorithm-specific and
+documented in L<provider-signature(7)/Signature parameters>.
 
 =item B<-vfyopt> I<nm>:I<v>
 
@@ -215,23 +228,40 @@ Don't output the text form of a certificate to the output file.
 Specify the date output format. Values are: rfc_822 and iso_8601.
 Defaults to rfc_822.
 
-=item B<-startdate> I<date>
+Note that despite its name, the rfc_822 format does not conform to RFC 822
+or its successors RFC 2822 and RFC 5322. It outputs dates in the format
+"Mmm DD HH:MM:SS YYYY GMT" (e.g., "Jul 31 22:20:50 2017 GMT"). The month
+appears before the day, unlike all three RFCs, which put the day first.
+The 4-digit year differs from RFC 822 (which used 2-digit years), and the
+timezone name "GMT" is obsolete per RFC 2822 and RFC 5322 (which require
+numeric offsets such as "+0000").
+
+=item B<-startdate> I<date>, B<-not_before> I<date>
 
 This allows the start date to be explicitly set. The format of the
 date is YYMMDDHHMMSSZ (the same as an ASN1 UTCTime structure), or
 YYYYMMDDHHMMSSZ (the same as an ASN1 GeneralizedTime structure). In
 both formats, seconds SS and timezone Z must be present.
+Alternatively, you can also use "today".
 
-=item B<-enddate> I<date>
+=item B<-enddate> I<date>, B<-not_after> I<date>
 
 This allows the expiry date to be explicitly set. The format of the
 date is YYMMDDHHMMSSZ (the same as an ASN1 UTCTime structure), or
 YYYYMMDDHHMMSSZ (the same as an ASN1 GeneralizedTime structure). In
 both formats, seconds SS and timezone Z must be present.
+Alternatively, you can also use "today".
+
+This overrides the B<-days> option.
 
 =item B<-days> I<arg>
 
-The number of days to certify the certificate for.
+The number of days from today to certify the certificate for.
+
+Regardless of the option B<-not_before>, the days are always counted from
+today.
+When used together with the option B<-not_after>/B<-startdate>, the explicit
+expiry date takes precedence.
 
 =item B<-md> I<alg>
 
@@ -246,13 +276,6 @@ This option defines the CA "policy" to use. This is a section in
 the configuration file which decides which fields should be mandatory
 or match the CA certificate. Check out the B<POLICY FORMAT> section
 for more information.
-
-=item B<-msie_hack>
-
-This is a deprecated option to make this command work with very old versions
-of the IE certificate enrollment control "certenr3". It used UniversalStrings
-for almost everything. Since the old control has various security bugs
-its use is strongly discouraged.
 
 =item B<-preserveDN>
 
@@ -281,16 +304,15 @@ and all certificates will be certified automatically.
 The section of the configuration file containing certificate extensions
 to be added when a certificate is issued (defaults to B<x509_extensions>
 unless the B<-extfile> option is used).
-If no X.509 extensions are specified then a V1 certificate is created,
-else a V3 certificate is created.
+
 See the L<x509v3_config(5)> manual page for details of the
 extension section format.
 
 =item B<-extfile> I<file>
 
-An additional configuration file to read certificate extensions from
-(using the default section unless the B<-extensions> option is also
-used).
+An additional configuration I<file> to read certificate extensions from
+(using its unnamed (C<default>) section unless the B<-extensions> option is
+also used).
 
 =item B<-subj> I<arg>
 
@@ -332,8 +354,6 @@ This overrides any option or configuration to use a serial number file.
 This option has been deprecated and has no effect.
 
 {- $OpenSSL::safe::opt_r_item -}
-
-{- $OpenSSL::safe::opt_engine_item -}
 
 {- $OpenSSL::safe::opt_provider_item -}
 
@@ -405,7 +425,7 @@ in delta CRLs which are not currently implemented.
 
 This sets the CRL revocation reason code to B<certificateHold> and the hold
 instruction to I<instruction> which must be an OID. Although any OID can be
-used only B<holdInstructionNone> (the use of which is discouraged by RFC2459)
+used, only B<holdInstructionNone> (the use of which is deprecated in RFC 5280),
 B<holdInstructionCallIssuer> or B<holdInstructionReject> will normally be used.
 
 =item B<-crl_compromise> I<time>
@@ -492,7 +512,7 @@ not necessary anymore, see the L</HISTORY> section.
 
 =item B<default_days>
 
-The same as the B<-days> option. The number of days to certify
+The same as the B<-days> option. The number of days from today to certify
 a certificate for.
 
 =item B<default_startdate>
@@ -653,12 +673,6 @@ Sign a certificate request:
 
  openssl ca -in req.pem -out newcert.pem
 
-Sign an SM2 certificate request:
-
- openssl ca -in sm2.csr -out sm2.crt -md sm3 \
-         -sigopt "distid:1234567812345678" \
-         -vfyopt "distid:1234567812345678"
-
 Sign a certificate request, using CA extensions:
 
  openssl ca -in req.pem -extensions v3_ca -out newcert.pem
@@ -701,7 +715,7 @@ A sample configuration file with the relevant sections for this command:
 
  default_days   = 365                   # how long to certify for
  default_crl_days= 30                   # how long before next CRL
- default_md     = md5                   # md to use
+ default_md     = sha256                # md to use
 
  policy         = policy_any            # default policy
  email_in_dn    = no                    # Don't add the email into cert DN
@@ -778,9 +792,9 @@ nevertheless some people are using it for this purpose at least internally.
 When doing so, specific care should be taken to
 properly secure the private key(s) used for signing certificates.
 It is advisable to keep them in a secure HW storage such as a smart card or HSM
-and access them via a suitable engine or crypto provider.
+and access them via a suitable crypto provider.
 
-This command command is effectively a single user command: no locking
+This command is effectively a single user command: no locking
 is done on the various files and attempts to run more than one B<openssl ca>
 command on the same database can have unpredictable results.
 
@@ -825,7 +839,16 @@ The B<-section> option was added in OpenSSL 3.0.0.
 The B<-multivalue-rdn> option has become obsolete in OpenSSL 3.0.0 and
 has no effect.
 
-The B<-engine> option was deprecated in OpenSSL 3.0.
+Since OpenSSL 3.2, generated certificates bear X.509 version 3,
+and key identifier extensions are included by default.
+
+The B<-engine> option was removed in OpenSSL 4.0.
+
+The B<-msie-hack> option was removed in OpenSSL 4.0.
+
+As of OpenSSL 4.0, the B<ca> utility no longer has specialised built-in logic
+to add the SKID or AKID extensions, they are handled through configuration
+files and command-line options just like any other extension.
 
 =head1 SEE ALSO
 
@@ -839,7 +862,7 @@ L<x509v3_config(5)>
 
 =head1 COPYRIGHT
 
-Copyright 2000-2021 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2000-2026 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

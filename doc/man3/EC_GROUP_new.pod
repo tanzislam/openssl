@@ -5,6 +5,7 @@
 EC_GROUP_get_ecparameters,
 EC_GROUP_get_ecpkparameters,
 EC_GROUP_new_from_params,
+EC_GROUP_to_params,
 EC_GROUP_new_from_ecparameters,
 EC_GROUP_new_from_ecpkparameters,
 EC_GROUP_new,
@@ -21,7 +22,9 @@ EC_GROUP_get_curve_GFp,
 EC_GROUP_set_curve_GF2m,
 EC_GROUP_get_curve_GF2m,
 EC_get_builtin_curves,
-OSSL_EC_curve_nid2name -
+OSSL_EC_curve_nid2name,
+EC_curve_nid2nist,
+EC_curve_nist2nid -
 Functions for creating and destroying EC_GROUP objects
 
 =head1 SYNOPSIS
@@ -30,6 +33,8 @@ Functions for creating and destroying EC_GROUP objects
 
  EC_GROUP *EC_GROUP_new_from_params(const OSSL_PARAM params[],
                                     OSSL_LIB_CTX *libctx, const char *propq);
+ OSSL_PARAM *EC_GROUP_to_params(const EC_GROUP *group, OSSL_LIB_CTX *libctx,
+                                const char *propq, BN_CTX *bnctx);
  EC_GROUP *EC_GROUP_new_from_ecparameters(const ECPARAMETERS *params);
  EC_GROUP *EC_GROUP_new_from_ecpkparameters(const ECPKPARAMETERS *params);
  void EC_GROUP_free(EC_GROUP *group);
@@ -54,10 +59,12 @@ Functions for creating and destroying EC_GROUP objects
 
  size_t EC_get_builtin_curves(EC_builtin_curve *r, size_t nitems);
  const char *OSSL_EC_curve_nid2name(int nid);
+ const char *EC_curve_nid2nist(int nid);
+ int EC_curve_nist2nid(const char *name);
 
-Deprecated since OpenSSL 3.0, can be hidden entirely by defining
-B<OPENSSL_API_COMPAT> with a suitable version value, see
-L<openssl_user_macros(7)>:
+The following functions have been deprecated since OpenSSL 3.0, and can be
+hidden entirely by defining B<OPENSSL_API_COMPAT> with a suitable version value,
+see L<openssl_user_macros(7)>:
 
  EC_GROUP *EC_GROUP_new(const EC_METHOD *meth);
  void EC_GROUP_clear_free(EC_GROUP *group);
@@ -107,10 +114,25 @@ The values for I<ctx> and I<propq> may be NULL.
 The I<params> that can be used are described in
 L<B<EVP_PKEY-EC>(7)|EVP_PKEY-EC(7)/Common EC parameters>.
 
+EC_GROUP_to_params creates an OSSL_PARAM array with the corresponding parameters
+describing the given EC_GROUP. The resulting parameters may contain parameters
+describing a named or explicit curve depending on the EC_GROUP.
+The library context I<libctx> (see L<OSSL_LIB_CTX(3)>) and property query string
+I<propq> are used to fetch algorithms from providers.
+I<bnctx> is an optional preallocated BN_CTX (to save the overhead of allocating
+and freeing the structure in a loop).
+The values for I<libctx>, I<propq> and I<bnctx> may be NULL.
+The caller is responsible for freeing the OSSL_PARAM pointer returned.
+
 EC_GROUP_new_from_ecparameters() will create a group from the
 specified I<params> and
 EC_GROUP_new_from_ecpkparameters() will create a group from the specific PK
 I<params>.
+
+EC_GROUP_get_ecpkparameters() creates an ECPKPARAMETERS object for the given
+I<group>.  If I<params> is NULL a new object is allocated, otherwise
+I<params> is filled in and returned.  Please note that I<params> is freed on
+failure and must not be used or freed by the caller in such case.
 
 EC_GROUP_set_curve() sets the curve parameters I<p>, I<a> and I<b>. For a curve
 over Fp I<p> is the prime for the field. For a curve over F2^m I<p> represents
@@ -177,6 +199,20 @@ If I<group> is NULL nothing is done.
 
 OSSL_EC_curve_nid2name() converts a curve I<nid> into the corresponding name.
 
+EC_curve_nid2nist() converts a curve I<nid> into the corresponding NIST name.
+NIST names are standardized curve names defined by NIST, such as "P-192", "P-224",
+"P-256", "P-384", and "P-521" for prime field curves, and "B-163", "B-233",
+"B-283", "B-409", "B-571", "K-163", "K-233", "K-283", "K-409", and "K-571" for
+binary field curves.
+If the curve specified by I<nid> does not have a NIST name, this function returns
+NULL.
+
+EC_curve_nist2nid() converts a NIST curve name I<name> to the corresponding NID.
+The I<name> argument should be a string containing a NIST curve name such as
+"P-256" or "B-163".
+If the name does not correspond to a known NIST curve, this function returns
+NID_undef.
+
 =head1 RETURN VALUES
 
 All EC_GROUP_new* functions return a pointer to the newly constructed group, or
@@ -190,6 +226,12 @@ EC_GROUP_get_curve_GF2m() return 1 on success or 0 on error.
 
 OSSL_EC_curve_nid2name() returns a character string constant, or NULL on error.
 
+EC_curve_nid2nist() returns a pointer to a constant string containing the NIST
+name for the specified curve, or NULL if the curve does not have a NIST name.
+
+EC_curve_nist2nid() returns the NID of the curve with the given NIST name, or
+NID_undef if the name does not correspond to a known NIST curve.
+
 =head1 SEE ALSO
 
 L<crypto(7)>, L<EC_GROUP_copy(3)>,
@@ -198,6 +240,8 @@ L<EC_GFp_simple_method(3)>, L<d2i_ECPKParameters(3)>,
 L<OSSL_LIB_CTX(3)>, L<EVP_PKEY-EC(7)>
 
 =head1 HISTORY
+
+EC_GROUP_to_params() was added in OpenSSL 3.2.
 
 =over 2
 
@@ -223,7 +267,7 @@ instead.
 
 =head1 COPYRIGHT
 
-Copyright 2013-2021 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2013-2026 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

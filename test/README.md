@@ -42,7 +42,7 @@ the make variable TESTS to specify them, like this:
 
     $ make TESTS='test_rsa test_dsa' test            # Unix
     $ mms/macro="TESTS=test_rsa test_dsa" test       ! OpenVMS
-    $ nmake TESTS='test_rsa test_dsa' test           # Windows
+    $ nmake TESTS="test_rsa test_dsa" test           # Windows
 
 And of course, you can combine (Unix examples shown):
 
@@ -149,17 +149,56 @@ To run up to four tests in parallel at any given time:
 
     $ make HARNESS_JOBS=4 test
 
+Test time limit
+---------------
+
+Each test program is run under a watchdog so that a test which hangs is
+identified rather than silently stalling the run. If a test program runs for
+longer than a fixed time limit the watchdog assumes it has hung and aborts it
+(via `abort()`). The abort marks that specific test as failed - so a hang is
+attributed to the test responsible rather than appearing as an anonymous
+stalled run - and, where the environment is configured to produce them, leaves
+a core dump capturing every thread's stack, so it can be seen where the test
+was wedged.
+
+The limit defaults to 1800 seconds (30 minutes) per test program and can be
+changed with the `OPENSSL_TEST_TIMEOUT` environment variable, which gives the
+limit in seconds. Setting it to `0` (or a negative value) disables the
+watchdog entirely.
+
+    $ make OPENSSL_TEST_TIMEOUT=600 test
+
+The limit applies to each individual test program, not to the test run as a
+whole. It only covers test programs built on the test framework; helper
+invocations of the `openssl` application are not affected.
+
+Random numbers in tests
+-----------------------
+
+Some tests use random numbers as part of the test. In some cases a test failure
+may occur for some random numbers, but not for others. The seed used for the
+rand number generator can be set via the `OPENSSL_TEST_RAND_SEED` environment
+variable. It can also be set via the `OPENSSL_TEST_RAND_ORDER` environment
+variable which additionally randomises the order tests are run in (see below).
+
+When a test fails the test harness will display the seed used during the test
+(displaying either the `OPENSSL_TEST_RAND_SEED` or `OPENSSL_TEST_RAND_ORDER`
+environment variable value that must be used to recreate the results), e.g.
+
+    $ make OPENSSL_TEST_RAND_SEED=42 test
+
 Randomisation of Test Ordering
 ------------------------------
 
 By default, the test harness will execute tests in the order they were added.
 By setting the `OPENSSL_TEST_RAND_ORDER` environment variable to zero, the
-test ordering will be randomised.  If a randomly ordered test fails, the
-seed value used will be reported.  Setting the `OPENSSL_TEST_RAND_ORDER`
-environment variable to this value will rerun the tests in the same
-order.  This assures repeatability of randomly ordered test runs.
-This repeatability is independent of the operating system, processor or
-platform used.
+test ordering will be randomised. This additionally seeds the random number
+generator used within the tests as described in the section above. If a randomly
+ordered test fails, the seed value used will be reported.  Setting the
+`OPENSSL_TEST_RAND_ORDER` environment variable to this value will rerun the
+tests in the same order and will also seed the test random number generator.
+This assures repeatability of randomly ordered test runs. This repeatability is
+independent of the operating system, processor or platform used.
 
 To randomise the test ordering:
 
@@ -168,3 +207,74 @@ To randomise the test ordering:
 To run the tests using the order defined by the random seed `42`:
 
     $ make OPENSSL_TEST_RAND_ORDER=42 test
+
+Memory Allocation Failure Tests
+-------------------------------
+
+Some tests use the `ADD_MFAIL_TEST` framework to exhaustively verify that
+functions handle every possible allocation failure gracefully. These tests
+run repeatedly, failing one allocation later each iteration. The
+`ADD_MFAIL_NO_CHECK_TEST` variant relaxes the requirement that the test
+return 0 when a failure was triggered. The `ADD_MFAIL_ALL_TESTS` and
+`ADD_MFAIL_ALL_NO_CHECK_TESTS` variants apply the same cycle to each index
+of a parameterised test, the same way `ADD_ALL_TESTS` does.
+
+The `ADD_MFAIL_SAMPLED_TEST(fn, cnt)` variant (and its `NO_CHECK` and `ALL`
+forms) caps injection at `cnt` points: it injects at every allocation when
+there are at most `cnt` of them, and otherwise samples `cnt` points spread
+across the run. This keeps tests with very many allocations bounded. On
+`no-cached-fetch` builds, where allocation counts explode, non-sampled tests
+run the counting phase only and skip injection; sampled tests still run.
+
+An mfail test returns 1 on success or 0 on failure; under `NO_CHECK` a 0 is
+tolerated since a function may legitimately fail when an allocation fails.
+Returning -1 forces a failure that is reported even under `NO_CHECK`, for
+assertions that must hold regardless of which allocation was made to fail.
+
+Behavior is controlled with the following environment variables:
+
+    OPENSSL_TEST_MFAIL_DISABLE=1    Disable mfail custom allocator installation.
+
+    OPENSSL_TEST_MFAIL_SKIP_ALL=1   Skip all mfail tests.
+
+    OPENSSL_TEST_MFAIL_SKIP_SLOW=1  Skip mfail tests whose allocation count
+                                    exceeds the slow threshold.
+
+    OPENSSL_TEST_MFAIL_SLOW=N       Slow threshold (default 1000).
+
+    OPENSSL_TEST_MFAIL_COUNT=N      Override the sampled point count, taking
+                                    precedence over the per-test value.
+
+    OPENSSL_TEST_MFAIL_COUNT_ONLY=1 Run the counting phase only, never inject.
+
+    OPENSSL_TEST_MFAIL_POINT=N      Run only failure point N (0-indexed),
+                                    useful for debugging a specific failure.
+
+    OPENSSL_TEST_MFAIL_START=N      Start iteration from point N, skipping
+                                    earlier points that are already fixed.
+
+    OPENSSL_TEST_MFAIL_BACKTRACE=1  Print a backtrace at each injection point.
+
+For example, to debug a failure at allocation point 42:
+
+    $ OPENSSL_TEST_MFAIL_POINT=42 ./test/crltest -test test_crl_diff_mfail
+
+Or to skip already-fixed points and collect remaining failures:
+
+    $ OPENSSL_TEST_MFAIL_START=13 make TESTS=test_crl test
+
+Running Tests under Valgrind
+----------------------------
+
+Normally, testing for memory leaks is accomplished by building Openssl with the
+enable-asan option, which links the library with the compiler asan library.  However
+some people prefer to use valgrind to do dynamic instrumentation for memory leak checking.
+OpenSSL also offers a suppression file to suppress reachable memory leaks, that are often
+inappropriately considered to be true leaks.  In order to maintain and test this
+suppression file, OpenSSL tests can be run under valgrind automatically.
+
+To run the test suite under valgrind:
+
+    $ make OSSL_USE_VALGRIND=yes test
+
+Doing so will create valgrind.log file for each test under the test-runs subdirectory.

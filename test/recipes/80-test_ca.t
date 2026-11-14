@@ -1,5 +1,5 @@
 #! /usr/bin/env perl
-# Copyright 2015-2021 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2015-2026 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -21,26 +21,31 @@ setup("test_ca");
 $ENV{OPENSSL} = cmdstr(app(["openssl"]), display => 1);
 
 my $cnf = srctop_file("test","ca-and-certs.cnf");
-my $std_openssl_cnf = '"'
-    . srctop_file("apps", $^O eq "VMS" ? "openssl-vms.cnf" : "openssl.cnf")
-    . '"';
+my $std_openssl_cnf = srctop_file("apps", $^O eq "VMS" ? "openssl-vms.cnf" : "openssl.cnf");
+
+sub src_file {
+    return srctop_file("test", "certs", shift);
+}
 
 rmtree("demoCA", { safe => 0 });
 
-plan tests => 15;
+plan tests => 31;
+
+require_ok(srctop_file("test", "recipes", "tconversion.pl"));
+
  SKIP: {
-     my $cakey = srctop_file("test", "certs", "ca-key.pem");
+     my $cakey = src_file("ca-key.pem");
      $ENV{OPENSSL_CONFIG} = qq(-config "$cnf");
      skip "failed creating CA structure", 4
          if !ok(run(perlapp(["CA.pl","-newca",
-                             "-extra-req", "-key $cakey"], stdin => undef)),
+                             "-extra-req", qq{-key "$cakey"}], stdin => undef)),
                 'creating CA structure');
 
-     my $eekey = srctop_file("test", "certs", "ee-key.pem");
+     my $eekey = src_file("ee-key.pem");
      $ENV{OPENSSL_CONFIG} = qq(-config "$cnf");
      skip "failed creating new certificate request", 3
          if !ok(run(perlapp(["CA.pl","-newreq",
-                             '-extra-req', "-outform DER -section userreq -key $eekey"])),
+                             '-extra-req', qq{-outform DER -section userreq -key "$eekey"}])),
                 'creating certificate request');
      $ENV{OPENSSL_CONFIG} = qq(-rand_serial -inform DER -config "$std_openssl_cnf");
      skip "failed to sign certificate request", 2
@@ -53,9 +58,10 @@ plan tests => 15;
      skip "CT not configured, can't use -precert", 1
          if disabled("ct");
 
-     my $eekey2 = srctop_file("test", "certs", "ee-key-3072.pem");
+     my $eekey2 = src_file("ee-key-3072.pem");
      $ENV{OPENSSL_CONFIG} = qq(-config "$cnf");
-     ok(run(perlapp(["CA.pl", "-precert", '-extra-req', "-section userreq -key $eekey2"], stderr => undef)),
+     ok(run(perlapp(["CA.pl", "-precert",
+                     '-extra-req', qq{-section userreq -key "$eekey2"}], stderr => undef)),
         'creating new pre-certificate');
 }
 
@@ -65,16 +71,37 @@ SKIP: {
 
     is(yes(cmdstr(app(["openssl", "ca", "-config",
                        $cnf,
-                       "-in", srctop_file("test", "certs", "sm2-csr.pem"),
-                       "-out", "sm2-test.crt",
-                       "-sigopt", "distid:1234567812345678",
-                       "-vfyopt", "distid:1234567812345678",
-                       "-md", "sm3",
-                       "-cert", srctop_file("test", "certs", "sm2-root.crt"),
-                       "-keyfile", srctop_file("test", "certs", "sm2-root.key")]))),
+                       "-in", src_file("sm2-csr.pem"),
+                       "-out", "sm2-test.crt", "-md", "sm3",
+                       "-cert", src_file("sm2-root.crt"),
+                       "-keyfile", src_file("sm2-root.key")]))),
        0,
        "Signing SM2 certificate request");
 }
+
+my $v3_cert = "v3-test.crt";
+ok(run(app(["openssl", "ca", "-batch", "-config", $cnf, "-extensions", "minimal",
+            "-in", src_file("x509-check.csr"), "-out", $v3_cert])));
+# The "minimal" extensions include SKID and AKID.
+has_version($v3_cert, 3);
+has_SKID($v3_cert, 1);
+has_AKID($v3_cert, 1);
+
+# Sign with X509v3 extensions from a separate -extfile, once using its
+# default section and once with a section selected via -extensions.
+test_extfile('extfile_default', [], qr/Digital Signature/);
+test_extfile('extfile_section', ['-extensions', 'alt_ext'],
+             qr/Key Encipherment/);
+
+# Generate a CRL with extensions from the config section named by -crlexts
+ok(run(app(['openssl', 'ca', '-config', $cnf, '-gencrl', '-crlsec', '60',
+            '-crlexts', 'crl_ext', '-out', 'crlexts-crl.pem'])),
+   'Generate CRL with -crlexts');
+my $crlexts_text = join('',
+    run(app(['openssl', 'crl', '-in', 'crlexts-crl.pem',
+             '-noout', '-text']), capture => 1));
+ok($crlexts_text =~ qr/Version 2/, 'CRL with extensions is version 2');
+ok($crlexts_text =~ qr/Authority Key Identifier/, 'CRL contains AKID');
 
 test_revoke('notimes', {
     should_succeed => 1,
@@ -113,6 +140,45 @@ test_revoke('both_generalizedtime', {
     nextupdate     => '20990908123456Z',
     should_succeed => 1,
 });
+
+sub test_extfile {
+    my ($filename, $ca_opts, $keyusage_re) = @_;
+
+    $ENV{CN2} = $filename;
+    ok(
+        run(app(['openssl',
+                 'req',
+                 '-config',  $cnf,
+                 '-new',
+                 '-key',     data_file('revoked.key'),
+                 '-out',     "$filename-req.pem",
+                 '-section', 'userreq',
+        ])),
+        "Generate CSR: $filename"
+    );
+    delete $ENV{CN2};
+
+    ok(
+        run(app(['openssl',
+                 'ca',
+                 '-batch',
+                 '-config',  $cnf,
+                 '-extfile', data_file('extensions.cnf'),
+                 @$ca_opts,
+                 '-in',      "$filename-req.pem",
+                 '-out',     "$filename-cert.pem",
+        ])),
+        "Sign CSR with -extfile: $filename"
+    );
+
+    has_version("$filename-cert.pem", 3);
+
+    my $keyusage = join('',
+        run(app(['openssl', 'x509', '-in', "$filename-cert.pem",
+                 '-noout', '-ext', 'keyUsage']), capture => 1));
+    ok($keyusage =~ $keyusage_re,
+       "keyUsage taken from the extfile: $filename");
+}
 
 sub test_revoke {
     my ($filename, $opts) = @_;

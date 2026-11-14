@@ -22,7 +22,7 @@ SSL_want_client_hello_cb - obtain state information TLS/SSL I/O operation
 
 =head1 DESCRIPTION
 
-SSL_want() returns state information for the SSL object B<ssl>.
+SSL_want() returns state information for the SSL object B<ssl>. B<ssl> B<MUST NOT> be NULL.
 
 The other SSL_want_*() calls are shortcuts for the possible states returned
 by SSL_want().
@@ -31,7 +31,7 @@ by SSL_want().
 
 SSL_want() examines the internal state information of the SSL object. Its
 return values are similar to that of L<SSL_get_error(3)>.
-Unlike L<SSL_get_error(3)>, which also evaluates the
+Unlike L<SSL_get_error(3)>, which also evaluates (indirectly) the
 error queue, the results are obtained by examining an internal state flag
 only. The information must therefore only be used for normal operation under
 nonblocking I/O. Error conditions are not handled and must be treated
@@ -70,8 +70,8 @@ A call to L<SSL_get_error(3)> should return B<SSL_ERROR_WANT_X509_LOOKUP>.
 
 =item SSL_RETRY_VERIFY
 
-The operation did not complete because an application callback set by
-SSL_CTX_set_cert_verify_callback() has asked to be called again.
+The operation did not complete because a certificate verification callback
+has asked to be called again via L<SSL_set_retry_verify(3)>.
 A call to L<SSL_get_error(3)> should return B<SSL_ERROR_WANT_RETRY_VERIFY>.
 
 =item SSL_ASYNC_PAUSED
@@ -99,6 +99,10 @@ SSL_want_x509_lookup(), SSL_want_retry_verify(),
 SSL_want_async(), SSL_want_async_job(), and SSL_want_client_hello_cb()
 return 1 when the corresponding condition is true or 0 otherwise.
 
+=head1 QUIC-SPECIFIC CONSIDERATIONS
+
+For QUIC, these functions relate only to the TLS handshake layer.
+
 =head1 SEE ALSO
 
 L<ssl(7)>, L<SSL_get_error(3)>
@@ -108,9 +112,11 @@ L<ssl(7)>, L<SSL_get_error(3)>
 The SSL_want_client_hello_cb() function and the SSL_CLIENT_HELLO_CB return value
 were added in OpenSSL 1.1.1.
 
+SSL_want_retry_verify() was added in OpenSSL 3.0.
+
 =head1 COPYRIGHT
 
-Copyright 2001-2021 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2001-2026 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

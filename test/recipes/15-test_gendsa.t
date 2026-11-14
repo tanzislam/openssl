@@ -1,5 +1,5 @@
 #! /usr/bin/env perl
-# Copyright 2017-2021 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2017-2026 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -11,7 +11,8 @@ use strict;
 use warnings;
 
 use File::Spec;
-use OpenSSL::Test qw/:DEFAULT srctop_file srctop_dir bldtop_dir bldtop_file/;
+use OpenSSL::Test qw/:DEFAULT srctop_file srctop_dir bldtop_dir bldtop_file
+                     app_fails slurp_file/;
 use OpenSSL::Test::Utils;
 
 BEGIN {
@@ -28,7 +29,7 @@ my $no_fips = disabled('fips') || ($ENV{NO_FIPS} // 0);
 
 plan tests =>
     ($no_fips ? 0 : 2)          # FIPS related tests
-    + 11;
+    + 19;
 
 ok(run(app([ 'openssl', 'genpkey', '-genparam',
              '-algorithm', 'DSA',
@@ -107,6 +108,100 @@ ok(!run(app([ 'openssl', 'genpkey',
               '-algorithm', 'DSA'])),
    "genpkey DSA with no params should fail");
 
+subtest "gendsa verbose mode" => sub {
+    plan tests => 4;
+
+    my $stderr_file = "gendsa_verbose.txt";
+
+    ok(run(app(['openssl', 'gendsa', '-verbose',
+                '-out', 'gendsatest-verbose.pem', 'dsagen.pem'],
+               stderr => $stderr_file)),
+       "gendsa -verbose generates a key");
+    my $err = slurp_file($stderr_file);
+    ok($err =~ qr/Generating DSA key with \d+ bits/,
+       "-verbose reports the key generation");
+
+    ok(run(app(['openssl', 'gendsa', '-quiet',
+                '-out', 'gendsatest-quiet.pem', 'dsagen.pem'],
+               stderr => $stderr_file)),
+       "gendsa -quiet generates a key");
+    $err = slurp_file($stderr_file);
+    ok($err !~ qr/Generating DSA key/,
+       "-quiet does not report the key generation");
+    unlink($stderr_file) if -f $stderr_file;
+};
+
+ok(!run(app(["openssl", "gendsa",
+             'dsagen.pem', "-verbose"])),
+   "gendsa with extra parameter (at end) should fail");
+
+subtest "gendsa error cases" => sub {
+    plan tests => 14;
+
+    app_fails('gendsa', "missing params file argument should fail",
+              qr/Missing argument: params file/);
+    app_fails('gendsa', "extra positional argument should fail",
+              qr/Extra argument after params file: "extra"/,
+              'dsagen.pem', 'extra');
+    app_fails('gendsa', "unknown cipher option should fail",
+              qr/Unknown option or cipher: badcipher/,
+              '-badcipher', 'dsagen.pem');
+    app_fails('gendsa', "invalid passout argument should fail",
+              qr/Error getting password/,
+              '-passout', 'bad:pass', 'dsagen.pem');
+    app_fails('gendsa', "nonexistent params file should fail",
+              qr/Could not open file or uri for loading key parameters/,
+              'nonexistent.pem');
+
+    my $garbage = "garbage.pem";
+    open(my $fh, '>', $garbage) or die "Cannot write $garbage: $!";
+    print $fh "not a valid DSA params file\n";
+    close($fh);
+    app_fails('gendsa', "garbage params file should fail",
+              qr/Could not find or decode key parameters/,
+              $garbage);
+    app_fails('gendsa', "non-DSA params file should fail",
+              qr/Could not find or decode key parameters of DSA parameters/,
+              srctop_file("test", "testrsa.pem"));
+};
+
+# test key generation with dsaparam tool
+ok(run(app([ 'openssl', 'dsaparam',
+             '-genkey',
+             '-text',
+             '1024',
+             ])),
+   "dsaparam -genkey DSA 1024 with default qbits");
+
+ok(run(app([ 'openssl', 'dsaparam',
+             '-genkey',
+             '-text',
+             '2048',
+             ])),
+   "dsaparam -genkey DSA 2048 with default qbits");
+
+ok(run(app([ 'openssl', 'dsaparam',
+             '-genkey',
+             '-text',
+             '1024', '160',
+             ])),
+   "dsaparam -genkey DSA 1024 with 160 qbits");
+
+ok(run(app([ 'openssl', 'dsaparam',
+             '-genkey',
+             '-text',
+             '2048', '224',
+             ])),
+   "dsaparam -genkey DSA 2048 with 224 qbits");
+
+ok(run(app([ 'openssl', 'dsaparam',
+             '-genkey',
+             '-text',
+             '2048', '256',
+             ])),
+   "dsaparam -genkey DSA 2048 with 256 qbits");
+# genkey test for 3072 bits keys were removed to speed up the tests
+
 unless ($no_fips) {
     my $provconf = srctop_file("test", "fips-and-base.cnf");
     my $provpath = bldtop_dir("providers");
@@ -115,22 +210,28 @@ unless ($no_fips) {
 
     $ENV{OPENSSL_TEST_LIBCTX} = "1";
 
+    # DSA signing/keygen is not approved in FIPS 140-3
+    run(test(["fips_version_test", "-config", $provconf, "<3.4.0"]),
+             capture => 1, statusvar => \my $dsasignpass);
+
     # Generate params
-    ok(run(app(['openssl', 'genpkey',
+    is(run(app(['openssl', 'genpkey',
                 @prov,
                '-genparam',
                '-algorithm', 'DSA',
                '-pkeyopt', 'pbits:3072',
                '-pkeyopt', 'qbits:256',
                '-out', 'gendsatest3072params.pem'])),
+       $dsasignpass,
        "Generating 3072-bit DSA params");
 
     # Generate keypair
-    ok(run(app(['openssl', 'genpkey',
+    is(run(app(['openssl', 'genpkey',
                 @prov,
                '-paramfile', 'gendsatest3072params.pem',
                '-text',
                '-out', 'gendsatest3072.pem'])),
+       $dsasignpass,
        "Generating 3072-bit DSA keypair");
 
 }

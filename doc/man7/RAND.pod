@@ -35,6 +35,23 @@ In this case the CSPRNG enters an error state and ceases to provide output,
 until it is able to recover from the error by reseeding itself.
 For more details on reseeding and error recovery, see L<EVP_RAND(7)>.
 
+The automatic reseeding reacts to a change of the process ID (a child created
+by fork(2) does not continue its parent's generator), to the number of
+requests made and to the time elapsed since the last reseed; see L<EVP_RAND(7)>.
+A child that keeps its parent's process ID does continue it: after a process
+with process ID 1 calls unshare(2) with B<CLONE_NEWPID>, the child it creates
+by fork(2) is process 1 of the new PID namespace.
+The automatic reseeding also does not detect that the process, or the virtual
+machine it runs in, has been restored from a saved image: a virtual machine
+restored from a snapshot, a process restored from a checkpoint, or a function
+resumed from an image continues from the generator state in the image, and
+several copies restored from one image produce the same output until their
+next scheduled reseed.
+An application that creates such a child, or that runs where such a restore
+can happen, should reseed in the child or after its own restore signal, for
+example by calling L<RAND_poll(3)>, which reseeds the primary DRBG; the public
+and private DRBGs then reseed from it at their next request.
+
 For values that should remain secret, you can use L<RAND_priv_bytes(3)>
 instead.
 This method does not provide 'better' randomness, it uses the same type of
@@ -54,7 +71,14 @@ only in exceptional cases and is not recommended, unless you have a profound
 knowledge of cryptographic principles and understand the implications of your
 changes.
 
-=head1 DEAFULT SETUP
+Finally, it is possible for a provider to bypass the default RAND setup for
+L<RAND_bytes(3)> and associated functions.  A provider can be specified as the
+single randomness source via the L<RAND_set1_random_provider(3)> function or via
+configuration using the B<random_provider> option in L<config(5)>.  Once specified,
+the nominated provider will be used directly when calling the L<RAND_bytes(3)>
+family of functions.
+
+=head1 DEFAULT SETUP
 
 The default OpenSSL RAND method is based on the EVP_RAND deterministic random
 bit generator (DRBG) classes.
@@ -68,11 +92,13 @@ L<RAND_bytes(3)>,
 L<RAND_priv_bytes(3)>,
 L<EVP_RAND(3)>,
 L<RAND_get0_primary(3)>,
-L<EVP_RAND(7)>
+L<config(5)>,
+L<EVP_RAND(7)>,
+L<RAND_set1_random_provider(3)>.
 
 =head1 COPYRIGHT
 
-Copyright 2018-2021 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2018-2025 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

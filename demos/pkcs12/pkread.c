@@ -13,7 +13,7 @@
 #include <openssl/err.h>
 #include <openssl/pkcs12.h>
 
-/* Simple PKCS#12 file reader */
+/* Simple PKCS #12 file reader */
 
 static char *find_friendly_name(PKCS12 *p12)
 {
@@ -30,7 +30,7 @@ static char *find_friendly_name(PKCS12 *p12)
     for (n = 0; n < sk_PKCS7_num(safes) && name == NULL; n++) {
         safe = sk_PKCS7_value(safes, n);
         if (OBJ_obj2nid(safe->type) != NID_pkcs7_data
-                || (bags = PKCS12_unpack_p7data(safe)) == NULL)
+            || (bags = PKCS12_unpack_p7data(safe)) == NULL)
             continue;
 
         for (m = 0; m < sk_PKCS12_SAFEBAG_num(bags) && name == NULL; m++) {
@@ -67,12 +67,17 @@ int main(int argc, char **argv)
     p12 = d2i_PKCS12_fp(fp, NULL);
     fclose(fp);
     if (p12 == NULL) {
-        fprintf(stderr, "Error reading PKCS#12 file\n");
+        fprintf(stderr, "Error reading PKCS #12 file\n");
+        ERR_print_errors_fp(stderr);
+        goto err;
+    }
+    if (!PKCS12_check_version(p12)) {
+        fprintf(stderr, "PKCS #12 file has incorrect version\n");
         ERR_print_errors_fp(stderr);
         goto err;
     }
     if (!PKCS12_parse(p12, argv[2], &pkey, &cert, &ca)) {
-        fprintf(stderr, "Error parsing PKCS#12 file\n");
+        fprintf(stderr, "Error parsing PKCS #12 file\n");
         ERR_print_errors_fp(stderr);
         goto err;
     }
@@ -101,11 +106,11 @@ int main(int argc, char **argv)
 
     ret = EXIT_SUCCESS;
 
- err:
+err:
     OPENSSL_free(name);
     X509_free(cert);
     EVP_PKEY_free(pkey);
-    sk_X509_pop_free(ca, X509_free);
+    OSSL_STACK_OF_X509_free(ca);
 
     return ret;
 }

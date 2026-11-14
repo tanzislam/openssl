@@ -21,7 +21,9 @@ ERR_add_error_txt, ERR_add_error_mem_bio
  void ERR_add_error_txt(const char *sep, const char *txt);
  void ERR_add_error_mem_bio(const char *sep, BIO *bio);
 
-Deprecated since OpenSSL 3.0:
+The following function has been deprecated since OpenSSL 3.0, and can be
+hidden entirely by defining B<OPENSSL_API_COMPAT> with a suitable version value,
+see L<openssl_user_macros(7)>:
 
  void ERR_put_error(int lib, int func, int reason, const char *file, int line);
 
@@ -105,8 +107,7 @@ with any sub-library code.
 =head3 Other pieces of software
 
 Other pieces of software that may want to use OpenSSL's error reporting
-system, such as engines or applications, must normally get their own
-numbers.
+system, such as applications, must normally get their own numbers.
 
 =over 4
 

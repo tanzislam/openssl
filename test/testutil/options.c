@@ -1,5 +1,5 @@
 /*
- * Copyright 2018-2020 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2018-2026 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -12,7 +12,6 @@
 #include "tu_local.h"
 #include "output.h"
 
-
 static int used[100] = { 0 };
 
 int test_skip_common_options(void)
@@ -22,7 +21,7 @@ int test_skip_common_options(void)
     while ((o = (OPTION_CHOICE_DEFAULT)opt_next()) != OPT_EOF) {
         switch (o) {
         case OPT_TEST_CASES:
-           break;
+            break;
         default:
         case OPT_ERR:
             return 0;
@@ -40,7 +39,7 @@ char *test_get_argument(size_t n)
 {
     char **argv = opt_rest();
 
-    OPENSSL_assert(n < sizeof(used));
+    OPENSSL_assert(n < OSSL_NELEM(used));
     if ((int)n >= opt_num_rest() || argv == NULL)
         return NULL;
     used[n] = 1;
@@ -60,7 +59,7 @@ void opt_check_usage(void)
     for (i = 0; i < n; i++) {
         if (used[i] == 0)
             test_printf_stderr("Warning ignored command-line argument %d: %s\n",
-                               i, argv[i]);
+                i, argv[i]);
     }
     if (i < arg_count)
         test_printf_stderr("Warning arguments %d and later unchecked\n", i);
@@ -76,4 +75,3 @@ int opt_printf_stderr(const char *fmt, ...)
     va_end(ap);
     return ret;
 }
-

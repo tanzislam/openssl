@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2015-2026 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -8,14 +8,31 @@
  */
 
 #ifndef OSSL_CRYPTO_X509_H
-# define OSSL_CRYPTO_X509_H
-# pragma once
+#define OSSL_CRYPTO_X509_H
+#pragma once
 
-# include "internal/refcount.h"
-# include <openssl/asn1.h>
-# include <openssl/x509.h>
-# include <openssl/conf.h>
-# include "crypto/types.h"
+#include "internal/refcount.h"
+#include <openssl/asn1.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
+#include <openssl/x509_vfy.h>
+#include <openssl/conf.h>
+#include "crypto/types.h"
+
+#include <crypto/asn1.h>
+#include <crypto/siphash.h>
+
+/*
+ * Size in bytes of the internal X509 / X509_CRL fingerprint, see
+ * ossl_x509_internal_fingerprint(). The fingerprint only short-circuits
+ * X509_cmp() and X509_CRL_match(), which compare the encodings on a match,
+ * so a collision costs one extra memcmp. With 64 bits a collision among
+ * n objects has probability about n^2 / 2^65: one in 10^12 for 10,000
+ * certificates, and even odds only at around 2^32 of them. The SipHash key
+ * is fixed, so an attacker can craft certificates that collide, but gains
+ * only that memcmp per colliding pair on certificates they had to supply.
+ */
+#define OSSL_X509_FINGERPRINT_SIZE SIPHASH_MIN_DIGEST_SIZE
 
 /* Internal X509 structures and functions: not for application use */
 
@@ -29,21 +46,21 @@
  * in RFC5280 et al.
  */
 struct X509_name_entry_st {
-    ASN1_OBJECT *object;        /* AttributeType */
-    ASN1_STRING *value;         /* AttributeValue */
-    int set;                    /* index of RDNSequence for this entry */
-    int size;                   /* temp variable */
+    ASN1_OBJECT *object; /* AttributeType */
+    ASN1_STRING *value; /* AttributeValue */
+    int set; /* index of RDNSequence for this entry */
+    int size; /* temp variable */
 };
 
 /* Name from RFC 5280. */
 struct X509_name_st {
     STACK_OF(X509_NAME_ENTRY) *entries; /* DN components */
-    int modified;               /* true if 'bytes' needs to be built */
-    BUF_MEM *bytes;             /* cached encoding: cannot be NULL */
+    int modified; /* true if 'bytes' needs to be built */
+    BUF_MEM *bytes; /* cached encoding: cannot be NULL */
     /* canonical encoding used for rapid Name comparison */
     unsigned char *canon_enc;
     int canon_enclen;
-} /* X509_NAME */ ;
+} /* X509_NAME */;
 
 /* Signature info structure */
 
@@ -61,10 +78,10 @@ struct x509_sig_info_st {
 /* PKCS#10 certificate request */
 
 struct X509_req_info_st {
-    ASN1_ENCODING enc;          /* cached encoding of signed part */
-    ASN1_INTEGER *version;      /* version, defaults to v1(0) so can be NULL */
-    X509_NAME *subject;         /* certificate request DN */
-    X509_PUBKEY *pubkey;        /* public key of request */
+    ASN1_ENCODING enc; /* cached encoding of signed part */
+    ASN1_INTEGER *version; /* version, defaults to v1(0) so can be NULL */
+    X509_NAME *subject; /* certificate request DN */
+    X509_PUBKEY *pubkey; /* public key of request */
     /*
      * Zero or more attributes.
      * NB: although attributes is a mandatory field some broken
@@ -74,33 +91,31 @@ struct X509_req_info_st {
 };
 
 struct X509_req_st {
-    X509_REQ_INFO req_info;     /* signed certificate request data */
-    X509_ALGOR sig_alg;         /* signature algorithm */
+    X509_REQ_INFO req_info; /* signed certificate request data */
+    X509_ALGOR sig_alg; /* signature algorithm */
     ASN1_BIT_STRING *signature; /* signature */
     CRYPTO_REF_COUNT references;
     CRYPTO_RWLOCK *lock;
 
     /* Set on live certificates for authentication purposes */
     ASN1_OCTET_STRING *distinguishing_id;
-    OSSL_LIB_CTX *libctx;
-    char *propq;
 };
 
 struct X509_crl_info_st {
-    ASN1_INTEGER *version;      /* version: defaults to v1(0) so may be NULL */
-    X509_ALGOR sig_alg;         /* signature algorithm */
-    X509_NAME *issuer;          /* CRL issuer name */
-    ASN1_TIME *lastUpdate;      /* lastUpdate field */
-    ASN1_TIME *nextUpdate;      /* nextUpdate field: optional */
-    STACK_OF(X509_REVOKED) *revoked;        /* revoked entries: optional */
-    STACK_OF(X509_EXTENSION) *extensions;   /* extensions: optional */
-    ASN1_ENCODING enc;                      /* encoding of signed portion of CRL */
+    ASN1_INTEGER *version; /* version: defaults to v1(0) so may be NULL */
+    X509_ALGOR sig_alg; /* signature algorithm */
+    X509_NAME *issuer; /* CRL issuer name */
+    ASN1_TIME *lastUpdate; /* lastUpdate field */
+    ASN1_TIME *nextUpdate; /* nextUpdate field: optional */
+    STACK_OF(X509_REVOKED) *revoked; /* revoked entries: optional */
+    STACK_OF(X509_EXTENSION) *extensions; /* extensions: optional */
+    ASN1_ENCODING enc; /* encoding of signed portion of CRL */
 };
 
 struct X509_crl_st {
-    X509_CRL_INFO crl;          /* signed CRL data */
-    X509_ALGOR sig_alg;         /* CRL signature algorithm */
-    ASN1_BIT_STRING signature;  /* CRL signature */
+    X509_CRL_INFO crl; /* signed CRL data */
+    X509_ALGOR sig_alg; /* CRL signature algorithm */
+    ASN1_BIT_STRING signature; /* CRL signature */
     CRYPTO_REF_COUNT references;
     int flags;
     /*
@@ -116,8 +131,12 @@ struct X509_crl_st {
     ASN1_INTEGER *crl_number;
     ASN1_INTEGER *base_crl_number;
     STACK_OF(GENERAL_NAMES) *issuers;
-    /* hash of CRL */
-    unsigned char sha1_hash[SHA_DIGEST_LENGTH];
+    /*
+     * Internal-use fingerprint for X509_CRL_match(), see
+     * ossl_x509_internal_fingerprint(). Not cryptographically secure and
+     * not collision free: a match is confirmed by comparing the CRLs.
+     */
+    unsigned char fingerprint[OSSL_X509_FINGERPRINT_SIZE];
     /* alternative method to handle this CRL */
     const X509_CRL_METHOD *meth;
     void *meth_data;
@@ -129,8 +148,8 @@ struct X509_crl_st {
 
 struct x509_revoked_st {
     ASN1_INTEGER serialNumber; /* revoked entry serial number */
-    ASN1_TIME *revocationDate;  /* revocation date */
-    STACK_OF(X509_EXTENSION) *extensions;   /* CRL entry extensions: optional */
+    ASN1_TIME *revocationDate; /* revocation date */
+    STACK_OF(X509_EXTENSION) *extensions; /* CRL entry extensions: optional */
     /* decoded value of CRLissuer extension: set if indirect CRL */
     STACK_OF(GENERAL_NAME) *issuer;
     /* revocation reason: set to CRL_REASON_NONE if reason extension absent */
@@ -152,13 +171,13 @@ struct x509_revoked_st {
 struct x509_cert_aux_st {
     STACK_OF(ASN1_OBJECT) *trust; /* trusted uses */
     STACK_OF(ASN1_OBJECT) *reject; /* rejected uses */
-    ASN1_UTF8STRING *alias;     /* "friendly name" */
-    ASN1_OCTET_STRING *keyid;   /* key id of private key */
+    ASN1_UTF8STRING *alias; /* "friendly name" */
+    ASN1_OCTET_STRING *keyid; /* key id of private key */
     STACK_OF(X509_ALGOR) *other; /* other unspecified info */
 };
 
 struct x509_cinf_st {
-    ASN1_INTEGER *version;      /* [ 0 ] default of v1 */
+    ASN1_INTEGER *version; /* [ 0 ] default of v1 */
     ASN1_INTEGER serialNumber;
     X509_ALGOR signature;
     X509_NAME *issuer;
@@ -175,7 +194,6 @@ struct x509_st {
     X509_CINF cert_info;
     X509_ALGOR sig_alg;
     ASN1_BIT_STRING signature;
-    X509_SIG_INFO siginf;
     CRYPTO_REF_COUNT references;
     CRYPTO_EX_DATA ex_data;
     /* These contain copies of various extension values */
@@ -191,64 +209,67 @@ struct x509_st {
     STACK_OF(DIST_POINT) *crldp;
     STACK_OF(GENERAL_NAME) *altname;
     NAME_CONSTRAINTS *nc;
-# ifndef OPENSSL_NO_RFC3779
+#ifndef OPENSSL_NO_RFC3779
     STACK_OF(IPAddressFamily) *rfc3779_addr;
     struct ASIdentifiers_st *rfc3779_asid;
-# endif
-    unsigned char sha1_hash[SHA_DIGEST_LENGTH];
+#endif
+    /*
+     * Internal-use fingerprint for X509_cmp(), see
+     * ossl_x509_internal_fingerprint(). Not cryptographically secure and
+     * not collision free: a match is confirmed by comparing the certificates.
+     */
+    unsigned char fingerprint[OSSL_X509_FINGERPRINT_SIZE];
     X509_CERT_AUX *aux;
     CRYPTO_RWLOCK *lock;
     volatile int ex_cached;
 
     /* Set on live certificates for authentication purposes */
     ASN1_OCTET_STRING *distinguishing_id;
-
-    OSSL_LIB_CTX *libctx;
-    char *propq;
-} /* X509 */ ;
+} /* X509 */;
 
 /*
  * This is a used when verifying cert chains.  Since the gathering of the
  * cert chain can take some time (and have to be 'retried', this needs to be
  * kept and passed around.
  */
-struct x509_store_ctx_st {      /* X509_STORE_CTX */
+struct x509_store_ctx_st { /* X509_STORE_CTX */
     X509_STORE *store;
     /* The following are set by the caller */
     /* The cert to check */
-    X509 *cert;
+    X509 *cert; /* XXX should really be made const */
     /* chain of X509s - untrusted - passed in */
     STACK_OF(X509) *untrusted;
     /* set of CRLs passed in */
     STACK_OF(X509_CRL) *crls;
+    STACK_OF(OCSP_RESPONSE) *ocsp_resp;
     X509_VERIFY_PARAM *param;
     /* Other info for use with get_issuer() */
     void *other_ctx;
     /* Callbacks for various operations */
     /* called to verify a certificate */
-    int (*verify) (X509_STORE_CTX *ctx);
+    int (*verify)(X509_STORE_CTX *ctx);
     /* error callback */
-    int (*verify_cb) (int ok, X509_STORE_CTX *ctx);
+    int (*verify_cb)(int ok, X509_STORE_CTX *ctx);
     /* get issuers cert from ctx */
-    int (*get_issuer) (X509 **issuer, X509_STORE_CTX *ctx, X509 *x);
+    X509_STORE_CTX_get_issuer_fn get_issuer;
     /* check issued */
-    int (*check_issued) (X509_STORE_CTX *ctx, X509 *x, X509 *issuer);
+    X509_STORE_CTX_check_issued_fn check_issued;
     /* Check revocation status of chain */
-    int (*check_revocation) (X509_STORE_CTX *ctx);
+    int (*check_revocation)(X509_STORE_CTX *ctx);
     /* retrieve CRL */
-    int (*get_crl) (X509_STORE_CTX *ctx, X509_CRL **crl, X509 *x);
+    int (*get_crl)(X509_STORE_CTX *ctx, X509_CRL **crl, X509 *x);
     /* Check CRL validity */
-    int (*check_crl) (X509_STORE_CTX *ctx, X509_CRL *crl);
+    int (*check_crl)(X509_STORE_CTX *ctx, X509_CRL *crl);
     /* Check certificate against CRL */
-    int (*cert_crl) (X509_STORE_CTX *ctx, X509_CRL *crl, X509 *x);
+    int (*cert_crl)(X509_STORE_CTX *ctx, X509_CRL *crl, X509 *x);
     /* Check policy status of the chain */
-    int (*check_policy) (X509_STORE_CTX *ctx);
-    STACK_OF(X509) *(*lookup_certs) (X509_STORE_CTX *ctx,
-                                     const X509_NAME *nm);
+    int (*check_policy)(X509_STORE_CTX *ctx);
+    STACK_OF(X509) *(*lookup_certs)(const X509_STORE_CTX *ctx,
+        const X509_NAME *nm);
     /* cannot constify 'ctx' param due to lookup_certs_sk() in x509_vfy.c */
-    STACK_OF(X509_CRL) *(*lookup_crls) (const X509_STORE_CTX *ctx,
-                                        const X509_NAME *nm);
-    int (*cleanup) (X509_STORE_CTX *ctx);
+    STACK_OF(X509_CRL) *(*lookup_crls)(const X509_STORE_CTX *ctx,
+        const X509_NAME *nm);
+    int (*cleanup)(X509_STORE_CTX *ctx);
     /* The following is built up */
     /* if 0, rebuild chain */
     int valid;
@@ -263,7 +284,7 @@ struct x509_store_ctx_st {      /* X509_STORE_CTX */
     /* When something goes wrong, this is why */
     int error_depth;
     int error;
-    X509 *current_cert;
+    X509 *current_cert; /* XXX should really be made const */
     /* cert currently being tested as valid issuer */
     X509 *current_issuer;
     /* current CRL */
@@ -278,6 +299,8 @@ struct x509_store_ctx_st {      /* X509_STORE_CTX */
     SSL_DANE *dane;
     /* signed via bare TA public key, rather than CA certificate */
     int bare_ta_signed;
+    /* Raw Public Key */
+    EVP_PKEY *rpk;
 
     OSSL_LIB_CTX *libctx;
     char *propq;
@@ -290,6 +313,7 @@ struct pkcs8_priv_key_info_st {
     X509_ALGOR *pkeyalg;
     ASN1_OCTET_STRING *pkey;
     STACK_OF(X509_ATTRIBUTE) *attributes;
+    ASN1_OCTET_STRING *kpub;
 };
 
 struct X509_sig_st {
@@ -301,67 +325,228 @@ struct x509_object_st {
     /* one of the above types */
     X509_LOOKUP_TYPE type;
     union {
-        char *ptr;
         X509 *x509;
         X509_CRL *crl;
-        EVP_PKEY *pkey;
     } data;
 };
 
 int ossl_a2i_ipadd(unsigned char *ipout, const char *ipasc);
-int ossl_x509_set1_time(ASN1_TIME **ptm, const ASN1_TIME *tm);
-int ossl_x509_print_ex_brief(BIO *bio, X509 *cert, unsigned long neg_cflags);
-int ossl_x509v3_cache_extensions(X509 *x);
-int ossl_x509_init_sig_info(X509 *x);
+int ossl_x509_set1_time(int *modified, ASN1_TIME **ptm, const ASN1_TIME *tm);
+int ossl_x509_print_ex_brief(BIO *bio, const X509 *cert, unsigned long neg_cflags);
+int ossl_x509v3_cache_extensions(const X509 *x);
 
-int ossl_x509_set0_libctx(X509 *x, OSSL_LIB_CTX *libctx, const char *propq);
+/**
+ * @brief Compute the internal-use fingerprint of a DER-encodable object.
+ *
+ * The fingerprint is cached in X509 / X509_CRL fingerprint and used only for
+ * internal identity comparison (X509_cmp(), X509_CRL_match()); it is never
+ * returned to callers, so the algorithm is an implementation detail
+ * (currently SipHash-2-4 with a fixed key and 64-bit output; a collision
+ * only costs the callers a fall through to their encoding comparison).
+ * Callers hash the whole signed object (X509, X509_CRL). No algorithm
+ * is fetched, so the result depends on neither the library context nor the
+ * property query string of the object and stays valid if the object is
+ * moved to another library context. It fails only if the object cannot be
+ * DER encoded, for instance a certificate still under construction, or on
+ * an allocation failure in the encoder.
+ *
+ * @param it the ASN1_ITEM describing @p val
+ * @param val the object to encode and hash
+ * @param hash output buffer for the fingerprint, OSSL_X509_FINGERPRINT_SIZE
+ *             bytes
+ * @returns 1 on success, 0 on failure
+ */
+int ossl_x509_internal_fingerprint(const ASN1_ITEM *it, const void *val,
+    unsigned char *hash);
+
+X509_NAME *ossl_dist_point_name_full(const struct DIST_POINT_NAME_st *dpn,
+    const X509_NAME *iname);
+
+/**
+ * @brief Verify a certificate signature, fetching algorithms from @p libctx.
+ *
+ * Like X509_verify(), but the signature algorithm is fetched from the given
+ * library context and property query rather than the certificate's own.
+ *
+ * @param a the certificate to verify
+ * @param r the public key of the issuer
+ * @param libctx the library context to fetch from, NULL for the default
+ * @param propq the property query to fetch with, may be NULL
+ * @returns 1 if the signature is valid, 0 if not, -1 on error
+ */
+int ossl_x509_verify_ex(const X509 *a, EVP_PKEY *r, OSSL_LIB_CTX *libctx,
+    const char *propq);
+
+/**
+ * @brief Verify a CRL signature, fetching algorithms from @p libctx.
+ *
+ * Like X509_CRL_verify(), but the signature algorithm is fetched from the
+ * given library context and property query rather than the CRL's own. A
+ * CRL with a custom X509_CRL_METHOD is verified by that method, which is
+ * not told about the library context.
+ *
+ * @param crl the CRL to verify
+ * @param r the public key of the issuer
+ * @param libctx the library context to fetch from, NULL for the default
+ * @param propq the property query to fetch with, may be NULL
+ * @returns 1 if the signature is valid, 0 if not, -1 on error
+ */
+int ossl_x509_crl_verify_ex(X509_CRL *crl, EVP_PKEY *r, OSSL_LIB_CTX *libctx,
+    const char *propq);
+
+/**
+ * @brief Describe a certificate's signature, fetching from @p libctx.
+ *
+ * Like X509_get_signature_info(), but any digest needed to determine the
+ * security bits is fetched from the given library context and property
+ * query rather than the certificate's own.
+ *
+ * @param x the certificate
+ * @param mdnid where to store the digest NID, may be NULL
+ * @param pknid where to store the public key algorithm NID, may be NULL
+ * @param secbits where to store the security bits, may be NULL
+ * @param flags where to store the X509_SIG_INFO flags, may be NULL
+ * @param libctx the library context to fetch from, NULL for the default
+ * @param propq the property query to fetch with, may be NULL
+ * @returns 1 if the information is valid, 0 if it is not available
+ */
+int ossl_x509_get_signature_info_ex(const X509 *x, int *mdnid, int *pknid,
+    int *secbits, uint32_t *flags, OSSL_LIB_CTX *libctx, const char *propq);
+
+/**
+ * @brief Digest a certificate with its own signature digest, fetching from
+ *        @p libctx.
+ *
+ * Like X509_digest_sig(), but the digest is fetched from the given library
+ * context and property query rather than the certificate's own.
+ *
+ * @param cert the certificate to digest
+ * @param md_used where to store the digest used, owned by the caller;
+ *                may be NULL
+ * @param md_is_fallback where to store whether a fallback digest was used
+ *                       because the signature algorithm has none; may be NULL
+ * @param libctx the library context to fetch from, NULL for the default
+ * @param propq the property query to fetch with, may be NULL
+ * @returns the digest as a new ASN1_OCTET_STRING, or NULL on error
+ */
+ASN1_OCTET_STRING *ossl_x509_digest_sig_ex(const X509 *cert,
+    EVP_MD **md_used, int *md_is_fallback,
+    OSSL_LIB_CTX *libctx, const char *propq);
+
+/**
+ * @brief Get the library context and property query of a certificate.
+ *
+ * A certificate has no library context of its own; the one given to
+ * X509_new_ex(), or to the decoder of the structure it is embedded in, is
+ * kept by its X509_PUBKEY, which needs it to decode the public key.
+ *
+ * @param x the certificate
+ * @param libctx where to store the library context, may be NULL
+ * @param propq where to store the property query, may be NULL
+ */
+void ossl_x509_get0_libctx(const X509 *x, OSSL_LIB_CTX **libctx,
+    const char **propq);
 int ossl_x509_crl_set0_libctx(X509_CRL *x, OSSL_LIB_CTX *libctx,
-                              const char *propq);
-int ossl_x509_req_set0_libctx(X509_REQ *x, OSSL_LIB_CTX *libctx,
-                              const char *propq);
+    const char *propq);
+/**
+ * @brief Get the library context and property query of a request.
+ *
+ * As for ossl_x509_get0_libctx(): the request has none of its own; the
+ * one given to X509_REQ_new_ex() is kept by its X509_PUBKEY.
+ *
+ * @param x the certificate request
+ * @param libctx where to store the library context, may be NULL
+ * @param propq where to store the property query, may be NULL
+ */
+void ossl_x509_req_get0_libctx(const X509_REQ *x, OSSL_LIB_CTX **libctx,
+    const char **propq);
 int ossl_asn1_item_digest_ex(const ASN1_ITEM *it, const EVP_MD *type,
-                             void *data, unsigned char *md, unsigned int *len,
-                             OSSL_LIB_CTX *libctx, const char *propq);
-int ossl_x509_add_cert_new(STACK_OF(X509) **sk, X509 *cert, int flags);
-int ossl_x509_add_certs_new(STACK_OF(X509) **p_sk, STACK_OF(X509) *certs,
-                            int flags);
+    void *data, unsigned char *md, unsigned int *len,
+    OSSL_LIB_CTX *libctx, const char *propq);
+int ossl_x509_add_cert_new(STACK_OF(X509) **sk, const X509 *cert, int flags);
+int ossl_x509_add_certs_new(STACK_OF(X509) **p_sk, const STACK_OF(X509) *certs, int flags);
 
 STACK_OF(X509_ATTRIBUTE) *ossl_x509at_dup(const STACK_OF(X509_ATTRIBUTE) *x);
+STACK_OF(X509_EXTENSION) *
+ossl_x509_req_get1_extensions_by_nid(const X509_REQ *req, int nid);
 
 int ossl_x509_PUBKEY_get0_libctx(OSSL_LIB_CTX **plibctx, const char **ppropq,
-                                 const X509_PUBKEY *key);
+    const X509_PUBKEY *key);
 /* Calculate default key identifier according to RFC 5280 section 4.2.1.2 (1) */
 ASN1_OCTET_STRING *ossl_x509_pubkey_hash(X509_PUBKEY *pubkey);
 
 X509_PUBKEY *ossl_d2i_X509_PUBKEY_INTERNAL(const unsigned char **pp,
-                                           long len, OSSL_LIB_CTX *libctx);
+    long len, OSSL_LIB_CTX *libctx,
+    const char *propq);
 void ossl_X509_PUBKEY_INTERNAL_free(X509_PUBKEY *xpub);
 
 RSA *ossl_d2i_RSA_PSS_PUBKEY(RSA **a, const unsigned char **pp, long length);
 int ossl_i2d_RSA_PSS_PUBKEY(const RSA *a, unsigned char **pp);
-# ifndef OPENSSL_NO_DH
+#ifndef OPENSSL_NO_DSA
+DSA *ossl_d2i_DSA_PUBKEY(DSA **a, const unsigned char **pp, long length);
+#endif /* OPENSSL_NO_DSA */
+#ifndef OPENSSL_NO_DH
 DH *ossl_d2i_DH_PUBKEY(DH **a, const unsigned char **pp, long length);
 int ossl_i2d_DH_PUBKEY(const DH *a, unsigned char **pp);
 DH *ossl_d2i_DHx_PUBKEY(DH **a, const unsigned char **pp, long length);
 int ossl_i2d_DHx_PUBKEY(const DH *a, unsigned char **pp);
-# endif /* OPENSSL_NO_DH */
-# ifndef OPENSSL_NO_EC
+#endif /* OPENSSL_NO_DH */
+#ifndef OPENSSL_NO_EC
 ECX_KEY *ossl_d2i_ED25519_PUBKEY(ECX_KEY **a,
-                                 const unsigned char **pp, long length);
+    const unsigned char **pp, long length);
 int ossl_i2d_ED25519_PUBKEY(const ECX_KEY *a, unsigned char **pp);
 ECX_KEY *ossl_d2i_ED448_PUBKEY(ECX_KEY **a,
-                               const unsigned char **pp, long length);
+    const unsigned char **pp, long length);
 int ossl_i2d_ED448_PUBKEY(const ECX_KEY *a, unsigned char **pp);
 ECX_KEY *ossl_d2i_X25519_PUBKEY(ECX_KEY **a,
-                                const unsigned char **pp, long length);
+    const unsigned char **pp, long length);
 int ossl_i2d_X25519_PUBKEY(const ECX_KEY *a, unsigned char **pp);
 ECX_KEY *ossl_d2i_X448_PUBKEY(ECX_KEY **a,
-                              const unsigned char **pp, long length);
+    const unsigned char **pp, long length);
 int ossl_i2d_X448_PUBKEY(const ECX_KEY *a, unsigned char **pp);
-# endif /* OPENSSL_NO_EC */
+#endif /* OPENSSL_NO_EC */
+
 EVP_PKEY *ossl_d2i_PUBKEY_legacy(EVP_PKEY **a, const unsigned char **pp,
-                                 long length);
+    long length);
+int ossl_x509_check_private_key(const EVP_PKEY *k, const EVP_PKEY *pkey);
 
 int x509v3_add_len_value_uchar(const char *name, const unsigned char *value,
-                               size_t vallen, STACK_OF(CONF_VALUE) **extlist);
-#endif  /* OSSL_CRYPTO_X509_H */
+    size_t vallen, STACK_OF(CONF_VALUE) **extlist);
+/* Attribute addition functions not checking for duplicate attributes */
+STACK_OF(X509_ATTRIBUTE) *ossl_x509at_add1_attr(STACK_OF(X509_ATTRIBUTE) **x,
+    const X509_ATTRIBUTE *attr);
+STACK_OF(X509_ATTRIBUTE) *ossl_x509at_add1_attr_by_OBJ(STACK_OF(X509_ATTRIBUTE) **x,
+    const ASN1_OBJECT *obj,
+    int type,
+    const unsigned char *bytes,
+    int len);
+STACK_OF(X509_ATTRIBUTE) *ossl_x509at_add1_attr_by_NID(STACK_OF(X509_ATTRIBUTE) **x,
+    int nid, int type,
+    const unsigned char *bytes,
+    int len);
+STACK_OF(X509_ATTRIBUTE) *ossl_x509at_add1_attr_by_txt(STACK_OF(X509_ATTRIBUTE) **x,
+    const char *attrname,
+    int type,
+    const unsigned char *bytes,
+    int len);
+
+int ossl_print_attribute_value(BIO *out,
+    int obj_nid,
+    const ASN1_TYPE *av,
+    int indent);
+
+int ossl_serial_number_print(BIO *out, const ASN1_INTEGER *bs, int indent);
+int ossl_bio_print_hex(BIO *out, unsigned char *buf, int len);
+int ossl_x509_compare_asn1_time(const X509_VERIFY_PARAM *vpm,
+    const ASN1_TIME *time, int *comparison);
+/* No error callback if depth < 0 */
+int ossl_x509_check_cert_time(X509_STORE_CTX *ctx, X509 *x, int depth);
+int ossl_x509_check_crl_time(X509_STORE_CTX *ctx, X509_CRL *crl, int notify);
+int ossl_posix_to_asn1_time(int64_t posix_time, ASN1_TIME **out_time);
+void ossl_x509_verify_param_set_time_posix(X509_VERIFY_PARAM *param, int64_t t);
+int ossl_x509_check_host(const X509 *x, const char *chk, size_t chklen,
+    unsigned int flags, char **peername);
+int ossl_x509_check_ip(const X509 *x, const unsigned char *chk, size_t chklen,
+    unsigned int flags);
+
+#endif /* OSSL_CRYPTO_X509_H */

@@ -9,7 +9,6 @@ EVP_PKEY_assign_RSA, EVP_PKEY_assign_DSA, EVP_PKEY_assign_DH,
 EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_POLY1305, EVP_PKEY_assign_SIPHASH,
 EVP_PKEY_get0_hmac, EVP_PKEY_get0_poly1305, EVP_PKEY_get0_siphash,
 EVP_PKEY_get0, EVP_PKEY_type, EVP_PKEY_get_id, EVP_PKEY_get_base_id,
-EVP_PKEY_set1_engine, EVP_PKEY_get0_engine,
 EVP_PKEY_id, EVP_PKEY_base_id -
 EVP_PKEY assignment functions
 
@@ -24,9 +23,9 @@ EVP_PKEY assignment functions
  #define EVP_PKEY_id EVP_PKEY_get_id
  #define EVP_PKEY_base_id EVP_PKEY_get_base_id
 
-Deprecated since OpenSSL 3.0, can be hidden entirely by defining
-B<OPENSSL_API_COMPAT> with a suitable version value, see
-L<openssl_user_macros(7)>:
+The following functions have been deprecated since OpenSSL 3.0, and can be
+hidden entirely by defining B<OPENSSL_API_COMPAT> with a suitable version value,
+see L<openssl_user_macros(7)>:
 
  int EVP_PKEY_set1_RSA(EVP_PKEY *pkey, RSA *key);
  int EVP_PKEY_set1_DSA(EVP_PKEY *pkey, DSA *key);
@@ -54,21 +53,21 @@ L<openssl_user_macros(7)>:
  int EVP_PKEY_assign_POLY1305(EVP_PKEY *pkey, ASN1_OCTET_STRING *key);
  int EVP_PKEY_assign_SIPHASH(EVP_PKEY *pkey, ASN1_OCTET_STRING *key);
 
- ENGINE *EVP_PKEY_get0_engine(const EVP_PKEY *pkey);
- int EVP_PKEY_set1_engine(EVP_PKEY *pkey, ENGINE *engine);
-
 =head1 DESCRIPTION
 
 EVP_PKEY_get_base_id() returns the type of I<pkey>. For example
 an RSA key will return B<EVP_PKEY_RSA>.
 
-EVP_PKEY_get_id() returns the actual OID associated with I<pkey>.
-Historically keys using the same algorithm could use different OIDs.
-For example an RSA key could use the OIDs corresponding to
+EVP_PKEY_get_id() returns the actual NID associated with I<pkey>
+only if the I<pkey> type isn't implemented just in a L<provider(7)>.
+Historically keys using the same algorithm could use different NIDs.
+For example an RSA key could use the NIDs corresponding to
 the NIDs B<NID_rsaEncryption> (equivalent to B<EVP_PKEY_RSA>) or
 B<NID_rsa> (equivalent to B<EVP_PKEY_RSA2>). The use of
-alternative non-standard OIDs is now rare so B<EVP_PKEY_RSA2> et al are not
+alternative non-standard NIDs is now rare so B<EVP_PKEY_RSA2> et al are not
 often seen in practice.
+EVP_PKEY_get_id() returns -1 (B<EVP_PKEY_KEYMGMT>) if the I<pkey> is
+only implemented in a L<provider(7)>.
 
 EVP_PKEY_type() returns the underlying type of the NID I<type>. For example
 EVP_PKEY_type(EVP_PKEY_RSA2) will return B<EVP_PKEY_RSA>.
@@ -123,16 +122,6 @@ the provider's key. Subsequent calls to EVP_PKEY_get1_RSA(),
 EVP_PKEY_get1_DSA(), EVP_PKEY_get1_DH() and EVP_PKEY_get1_EC_KEY() will always
 return the cached copy returned by the first call.
 
-EVP_PKEY_get0_engine() returns a reference to the ENGINE handling I<pkey>. This
-function is deprecated. Applications should use providers instead of engines
-(see L<provider(7)> for details).
-
-EVP_PKEY_set1_engine() sets the ENGINE handling I<pkey> to I<engine>. It
-must be called after the key algorithm and components are set up.
-If I<engine> does not include an B<EVP_PKEY_METHOD> for I<pkey> an
-error occurs. This function is deprecated. Applications should use providers
-instead of engines (see L<provider(7)> for details).
-
 =head1 WARNINGS
 
 The following functions are only reliable with B<EVP_PKEY>s that have
@@ -141,6 +130,9 @@ been assigned an internal key with EVP_PKEY_assign_*():
 EVP_PKEY_get_id(), EVP_PKEY_get_base_id(), EVP_PKEY_type()
 
 For EVP_PKEY key type checking purposes, L<EVP_PKEY_is_a(3)> is more generic.
+
+For purposes of retrieving the name of the B<EVP_PKEY> the function
+L<EVP_PKEY_get0_type_name(3)> is more generally useful.
 
 The keys returned from the functions EVP_PKEY_get0_RSA(), EVP_PKEY_get0_DSA(),
 EVP_PKEY_get0_DH() and EVP_PKEY_get0_EC_KEY() were changed to have a "const"
@@ -175,9 +167,6 @@ Previous versions of this document suggested using EVP_PKEY_type(pkey->type)
 to determine the type of a key. Since B<EVP_PKEY> is now opaque this
 is no longer possible: the equivalent is EVP_PKEY_get_base_id(pkey).
 
-EVP_PKEY_set1_engine() is typically used by an ENGINE returning an HSM
-key as part of its routine to load a private key.
-
 =head1 RETURN VALUES
 
 EVP_PKEY_set1_RSA(), EVP_PKEY_set1_DSA(), EVP_PKEY_set1_DH() and
@@ -194,8 +183,6 @@ and EVP_PKEY_assign_SIPHASH() return 1 for success and 0 for failure.
 EVP_PKEY_get_base_id(), EVP_PKEY_get_id() and EVP_PKEY_type() return a key
 type or B<NID_undef> (equivalently B<EVP_PKEY_NONE>) on error.
 
-EVP_PKEY_set1_engine() returns 1 for success and 0 for failure.
-
 =head1 SEE ALSO
 
 L<EVP_PKEY_new(3)>, L<SM2(7)>
@@ -211,8 +198,8 @@ EVP_PKEY_get1_RSA, EVP_PKEY_get1_DSA, EVP_PKEY_get1_DH, EVP_PKEY_get1_EC_KEY,
 EVP_PKEY_get0_RSA, EVP_PKEY_get0_DSA, EVP_PKEY_get0_DH, EVP_PKEY_get0_EC_KEY,
 EVP_PKEY_assign_RSA, EVP_PKEY_assign_DSA, EVP_PKEY_assign_DH,
 EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_POLY1305, EVP_PKEY_assign_SIPHASH,
-EVP_PKEY_get0_hmac, EVP_PKEY_get0_poly1305, EVP_PKEY_get0_siphash,
-EVP_PKEY_set1_engine and EVP_PKEY_get0_engine were deprecated in OpenSSL 3.0.
+EVP_PKEY_get0_hmac, EVP_PKEY_get0_poly1305 and EVP_PKEY_get0_siphash
+were deprecated in OpenSSL 3.0.
 
 The return value from EVP_PKEY_get0_RSA, EVP_PKEY_get0_DSA, EVP_PKEY_get0_DH,
 EVP_PKEY_get0_EC_KEY were made const in OpenSSL 3.0.
@@ -222,7 +209,7 @@ It was removed in OpenSSL 3.0.
 
 =head1 COPYRIGHT
 
-Copyright 2002-2021 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2002-2023 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

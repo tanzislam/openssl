@@ -41,7 +41,8 @@ property names like
 
 A I<property> is a I<name=value> pair.
 A I<property definition> is a sequence of comma separated properties.
-There can be any number of properties in a definition.
+There can be any number of properties in a definition, however each name must
+be unique.
 For example: "" defines an empty property definition (i.e., no restriction);
 "my.foo=bar" defines a property named I<my.foo> which has a string value I<bar>
 and "iteration.count=3" defines a property named I<iteration.count> which
@@ -68,6 +69,7 @@ Matching such clauses is not a requirement, but any additional optional
 match counts in favor of the algorithm.
 More details about that in the B<Lookups> section.
 A I<property query> is a sequence of comma separated property query clauses.
+It is an error if a property name appears in more than one query clause.
 The full syntax for property queries appears below, but the available syntactic
 features are:
 
@@ -102,6 +104,12 @@ B<'...'> is a quoted string.
 The quotes are not included in the body of the string.
 
 =back
+
+String values in property definitions and queries are matched case-sensitively.
+An unquoted string value is converted to lowercase when it is parsed, while a
+quoted string value retains its case.  For example, C<foo=bar> matches
+C<foo='bar'>, and C<foo=BAR> is treated as C<foo=bar>, but neither matches
+C<foo='BAR'>.
 
 =head2 Lookups
 
@@ -140,6 +148,38 @@ Note that the local property query could not use "fips=no" because that would
 disallow any implementations with "fips=yes" rather than not caring about the
 setting.
 
+=head1 PREDEFINED NAMES
+
+=for comment This list should correspond to the array 'predefined_names' in crypto/property/property_parse.c
+
+Currently known predefined names are:
+
+=over 4
+
+=item C<provider>
+
+The conventional property value is the provider's name.  This may be different from the name returned by L<OSSL_PROVIDER_get0_name(3)>.
+
+It is a convention among OpenSSL provider implementations to define a property with this name.  It is not mandatory to do this.
+
+=item C<version>
+
+The conventional property value is the provider's version.
+
+OpenSSL provider implementations do not define a property with this name.
+
+=item C<fips>
+
+The conventional property value is boolean (C<"yes"> or C<"no">), indication whether the implementation conforms to FIPS standards or not.
+
+It is a convention among OpenSSL provider implementations to define a property with this name where applicable.  It is not mandatory to do this, but is strongly recommended.
+
+=item C<output>, C<input>, C<structure>
+
+Properties with these names are used by encoders (see L<provider-encoder(7)>) and decoders (see L<provider-decoder(7)>).
+
+=back
+
 =head1 SYNTAX
 
 The lexical syntax in EBNF is given by:
@@ -152,9 +192,12 @@ The lexical syntax in EBNF is given by:
  Value          ::= NumberLiteral | StringLiteral
  StringLiteral  ::= QuotedString | UnquotedString
  QuotedString   ::= '"' [^"]* '"' | "'" [^']* "'"
- UnquotedString ::= [^{space},]+
+ UnquotedString ::= [A-Za-z] [^{space},]+
  NumberLiteral  ::= '0' ( [0-7]* | 'x' [0-9A-Fa-f]+ ) | '-'? [1-9] [0-9]+
- PropertyName   ::= [A-Z] [A-Z0-9_]* ( '.' [A-Z] [A-Z0-9_]* )*
+ PropertyName   ::= [A-Za-z] [A-Za-z0-9_]* ( '.' [A-Za-z] [A-Za-z0-9_]* )*
+
+The flavour of EBNF being used is defined by:
+L<https://www.w3.org/TR/2010/REC-xquery-20101214/#EBNFNotation>.
 
 =head1 HISTORY
 
@@ -162,7 +205,7 @@ Properties were added in OpenSSL 3.0
 
 =head1 COPYRIGHT
 
-Copyright 2019-2020 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2019-2026 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2018-2026 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -23,16 +23,15 @@ EVP_MAC_CTX *EVP_MAC_CTX_new(EVP_MAC *mac)
 {
     EVP_MAC_CTX *ctx = OPENSSL_zalloc(sizeof(EVP_MAC_CTX));
 
-    if (ctx == NULL
-        || (ctx->algctx = mac->newctx(ossl_provider_ctx(mac->prov))) == NULL
-        || !EVP_MAC_up_ref(mac)) {
-        ERR_raise(ERR_LIB_EVP, ERR_R_MALLOC_FAILURE);
-        if (ctx != NULL)
-            mac->freectx(ctx->algctx);
-        OPENSSL_free(ctx);
-        ctx = NULL;
-    } else {
+    if (ctx != NULL) {
         ctx->meth = mac;
+        if ((ctx->algctx = mac->newctx(ossl_provider_ctx(mac->prov))) == NULL
+            || !EVP_MAC_up_ref(mac)) {
+            mac->freectx(ctx->algctx);
+            ERR_raise(ERR_LIB_EVP, ERR_R_EVP_LIB);
+            OPENSSL_free(ctx);
+            ctx = NULL;
+        }
     }
     return ctx;
 }
@@ -56,14 +55,12 @@ EVP_MAC_CTX *EVP_MAC_CTX_dup(const EVP_MAC_CTX *src)
         return NULL;
 
     dst = OPENSSL_malloc(sizeof(*dst));
-    if (dst == NULL) {
-        ERR_raise(ERR_LIB_EVP, ERR_R_MALLOC_FAILURE);
+    if (dst == NULL)
         return NULL;
-    }
 
     *dst = *src;
     if (!EVP_MAC_up_ref(dst->meth)) {
-        ERR_raise(ERR_LIB_EVP, ERR_R_MALLOC_FAILURE);
+        ERR_raise(ERR_LIB_EVP, ERR_R_EVP_LIB);
         OPENSSL_free(dst);
         return NULL;
     }
@@ -116,22 +113,62 @@ size_t EVP_MAC_CTX_get_block_size(EVP_MAC_CTX *ctx)
 }
 
 int EVP_MAC_init(EVP_MAC_CTX *ctx, const unsigned char *key, size_t keylen,
-                 const OSSL_PARAM params[])
+    const OSSL_PARAM params[])
 {
-    return ctx->meth->init(ctx->algctx, key, keylen, params);
+    if (ctx->meth->init == NULL) {
+        ERR_raise(ERR_R_EVP_LIB, ERR_R_UNSUPPORTED);
+        return 0;
+    }
+    /* The implementation may have been partially re-keyed: start over */
+    if (!ctx->meth->init(ctx->algctx, key, keylen, params)) {
+        ctx->state = EVP_MAC_STATE_NEW;
+        return 0;
+    }
+    ctx->state = EVP_MAC_STATE_INITIALISED;
+    return 1;
+}
+
+int EVP_MAC_init_SKEY(EVP_MAC_CTX *ctx, EVP_SKEY *skey, const OSSL_PARAM params[])
+{
+    if (ctx->meth->init_skey == NULL
+        || skey->skeymgmt->prov != ctx->meth->prov
+        || ctx->meth->init_skey == NULL) {
+        ERR_raise(ERR_R_EVP_LIB, ERR_R_UNSUPPORTED);
+        return 0;
+    }
+    if (!ctx->meth->init_skey(ctx->algctx, skey->keydata, params)) {
+        ctx->state = EVP_MAC_STATE_NEW;
+        return 0;
+    }
+    ctx->state = EVP_MAC_STATE_INITIALISED;
+    return 1;
 }
 
 int EVP_MAC_update(EVP_MAC_CTX *ctx, const unsigned char *data, size_t datalen)
 {
-    return ctx->meth->update(ctx->algctx, data, datalen);
+    switch (ctx->state) {
+    case EVP_MAC_STATE_NEW:
+        ERR_raise(ERR_LIB_EVP, EVP_R_OPERATION_NOT_INITIALIZED);
+        return 0;
+    case EVP_MAC_STATE_FINALISED:
+        ERR_raise(ERR_LIB_EVP, EVP_R_UPDATE_ERROR);
+        return 0;
+    default:
+        break;
+    }
+    if (!ctx->meth->update(ctx->algctx, data, datalen))
+        return 0;
+    ctx->state = EVP_MAC_STATE_UPDATED;
+    return 1;
 }
 
 static int evp_mac_final(EVP_MAC_CTX *ctx, int xof,
-                         unsigned char *out, size_t *outl, size_t outsize)
+    unsigned char *out, size_t *outl, size_t outsize)
 {
     size_t l;
     int res;
     OSSL_PARAM params[2];
+    size_t macsize;
 
     if (ctx == NULL || ctx->meth == NULL) {
         ERR_raise(ERR_LIB_EVP, EVP_R_INVALID_NULL_ALGORITHM);
@@ -142,13 +179,28 @@ static int evp_mac_final(EVP_MAC_CTX *ctx, int xof,
         return 0;
     }
 
+    macsize = EVP_MAC_CTX_get_mac_size(ctx);
     if (out == NULL) {
         if (outl == NULL) {
             ERR_raise(ERR_LIB_EVP, ERR_R_PASSED_NULL_PARAMETER);
             return 0;
         }
-        *outl = EVP_MAC_CTX_get_mac_size(ctx);
+        *outl = macsize;
         return 1;
+    }
+    switch (ctx->state) {
+    case EVP_MAC_STATE_NEW:
+        ERR_raise(ERR_LIB_EVP, EVP_R_OPERATION_NOT_INITIALIZED);
+        return 0;
+    case EVP_MAC_STATE_FINALISED:
+        ERR_raise(ERR_LIB_EVP, EVP_R_FINAL_ERROR);
+        return 0;
+    default:
+        break;
+    }
+    if (outsize < macsize) {
+        ERR_raise(ERR_LIB_EVP, EVP_R_BUFFER_TOO_SMALL);
+        return 0;
     }
     if (xof) {
         params[0] = OSSL_PARAM_construct_int(OSSL_MAC_PARAM_XOF, &xof);
@@ -160,13 +212,14 @@ static int evp_mac_final(EVP_MAC_CTX *ctx, int xof,
         }
     }
     res = ctx->meth->final(ctx->algctx, out, &l, outsize);
+    ctx->state = EVP_MAC_STATE_FINALISED;
     if (outl != NULL)
         *outl = l;
     return res;
 }
 
 int EVP_MAC_final(EVP_MAC_CTX *ctx,
-                  unsigned char *out, size_t *outl, size_t outsize)
+    unsigned char *out, size_t *outl, size_t outsize)
 {
     return evp_mac_final(ctx, 0, out, outl, outsize);
 }
@@ -220,12 +273,12 @@ const char *EVP_MAC_get0_description(const EVP_MAC *mac)
 
 int EVP_MAC_is_a(const EVP_MAC *mac, const char *name)
 {
-    return evp_is_a(mac->prov, mac->name_id, NULL, name);
+    return mac != NULL && evp_is_a(mac->prov, mac->name_id, NULL, name);
 }
 
 int EVP_MAC_names_do_all(const EVP_MAC *mac,
-                         void (*fn)(const char *name, void *data),
-                         void *data)
+    void (*fn)(const char *name, void *data),
+    void *data)
 {
     if (mac->prov != NULL)
         return evp_names_do_all(mac->prov, mac->name_id, fn, data);
@@ -234,15 +287,16 @@ int EVP_MAC_names_do_all(const EVP_MAC *mac,
 }
 
 unsigned char *EVP_Q_mac(OSSL_LIB_CTX *libctx,
-                         const char *name, const char *propq,
-                         const char *subalg, const OSSL_PARAM *params,
-                         const void *key, size_t keylen,
-                         const unsigned char *data, size_t datalen,
-                         unsigned char *out, size_t outsize, size_t *outlen)
+    const char *name, const char *propq,
+    const char *subalg, const OSSL_PARAM *params,
+    const void *key, size_t keylen,
+    const unsigned char *data, size_t datalen,
+    unsigned char *out, size_t outsize, size_t *outlen)
 {
     EVP_MAC *mac = EVP_MAC_fetch(libctx, name, propq);
-    OSSL_PARAM subalg_param[] = { OSSL_PARAM_END, OSSL_PARAM_END };
-    EVP_MAC_CTX *ctx  = NULL;
+    OSSL_PARAM subalg_param[3];
+    OSSL_PARAM *p = subalg_param;
+    EVP_MAC_CTX *ctx = NULL;
     size_t len = 0;
     unsigned char *res = NULL;
 
@@ -266,18 +320,35 @@ unsigned char *EVP_Q_mac(OSSL_LIB_CTX *libctx,
                 goto err;
             }
         }
-        subalg_param[0] =
-            OSSL_PARAM_construct_utf8_string(param_name, (char *)subalg, 0);
+        *p++ = OSSL_PARAM_construct_utf8_string(param_name, (char *)subalg, 0);
     }
+
+    /*
+     * If we passed in a property query, make sure the underlying algorithm uses it.
+     * Compound algorithms may fetch other underlying algorithms (i.e. a MAC algorithm
+     * may use a digest algorithm as part of its internal work), and the MAC decides which
+     * implementation of the underlying digest to use based on the
+     * OSSL_ALG_PARAM_PROPERTIES parameter, rather than the propq value passed in the
+     * EVP_MAC_fetch call above.
+     * If we don't set this parameter, then the MAC alg may use the default provider
+     * to allocate an underlying digest, rather than the one that we would have gotten
+     * by using the propq value here.
+     */
+    if (propq != NULL)
+        *p++ = OSSL_PARAM_construct_utf8_string(OSSL_ALG_PARAM_PROPERTIES,
+            (char *)propq, 0);
+
+    *p = OSSL_PARAM_construct_end();
+
     /* Single-shot - on NULL key input, set dummy key value for EVP_MAC_Init. */
     if (key == NULL && keylen == 0)
         key = data;
     if ((ctx = EVP_MAC_CTX_new(mac)) != NULL
-            && EVP_MAC_CTX_set_params(ctx, subalg_param)
-            && EVP_MAC_CTX_set_params(ctx, params)
-            && EVP_MAC_init(ctx, key, keylen, params)
-            && EVP_MAC_update(ctx, data, datalen)
-            && EVP_MAC_final(ctx, out, &len, outsize)) {
+        && EVP_MAC_CTX_set_params(ctx, subalg_param)
+        && EVP_MAC_CTX_set_params(ctx, params)
+        && EVP_MAC_init(ctx, key, keylen, params)
+        && EVP_MAC_update(ctx, data, datalen)
+        && EVP_MAC_final(ctx, out, &len, outsize)) {
         if (out == NULL) {
             out = OPENSSL_malloc(len);
             if (out != NULL && !EVP_MAC_final(ctx, out, NULL, len)) {
@@ -290,7 +361,7 @@ unsigned char *EVP_Q_mac(OSSL_LIB_CTX *libctx,
             *outlen = len;
     }
 
- err:
+err:
     EVP_MAC_CTX_free(ctx);
     EVP_MAC_free(mac);
     return res;

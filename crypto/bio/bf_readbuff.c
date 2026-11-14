@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2021-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -19,7 +19,7 @@
 #include "bio_local.h"
 #include "internal/cryptlib.h"
 
-#define DEFAULT_BUFFER_SIZE     4096
+#define DEFAULT_BUFFER_SIZE 4096
 
 static int readbuffer_write(BIO *h, const char *buf, int num);
 static int readbuffer_read(BIO *h, char *buf, int size);
@@ -87,18 +87,26 @@ static int readbuffer_free(BIO *a)
 static int readbuffer_resize(BIO_F_BUFFER_CTX *ctx, int sz)
 {
     char *tmp;
+    size_t newsize;
 
-    /* Figure out how many blocks are required */
-    sz += (ctx->ibuf_off + DEFAULT_BUFFER_SIZE - 1);
-    sz = DEFAULT_BUFFER_SIZE * (sz / DEFAULT_BUFFER_SIZE);
+    /*
+     * Do the arithmetic in size_t and fail if the required size does
+     * not fit in the int size/offset fields: ibuf_off only grows as
+     * data is cached, so the int calculation overflowed near INT_MAX.
+     */
+    newsize = (size_t)ctx->ibuf_off + (size_t)sz;
+    if (newsize > (size_t)(INT_MAX - (DEFAULT_BUFFER_SIZE - 1)))
+        return 0;
+    newsize += DEFAULT_BUFFER_SIZE - 1;
+    newsize = DEFAULT_BUFFER_SIZE * (newsize / DEFAULT_BUFFER_SIZE);
 
     /* Resize if the buffer is not big enough */
-    if (sz > ctx->ibuf_size) {
-        tmp = OPENSSL_realloc(ctx->ibuf, sz);
+    if (newsize > (size_t)ctx->ibuf_size) {
+        tmp = OPENSSL_realloc(ctx->ibuf, newsize);
         if (tmp == NULL)
             return 0;
         ctx->ibuf = tmp;
-        ctx->ibuf_size = sz;
+        ctx->ibuf_size = (int)newsize;
     }
     return 1;
 }
@@ -222,10 +230,13 @@ static int readbuffer_gets(BIO *b, char *buf, int size)
     char *p;
     int i, j;
 
-    if (size == 0)
+    if (buf == NULL || size == 0)
         return 0;
     --size; /* the passed in size includes the terminator - so remove it here */
     ctx = (BIO_F_BUFFER_CTX *)b->ptr;
+
+    if (ctx == NULL || b->next_bio == NULL)
+        return 0;
     BIO_clear_retry_flags(b);
 
     /* If data is already buffered then use this first */
@@ -233,8 +244,8 @@ static int readbuffer_gets(BIO *b, char *buf, int size)
         p = ctx->ibuf + ctx->ibuf_off;
         found_newline = 0;
         for (num_chars = 0;
-             (num_chars < ctx->ibuf_len) && (num_chars < size);
-             num_chars++) {
+            (num_chars < ctx->ibuf_len) && (num_chars < size);
+            num_chars++) {
             *buf++ = p[num_chars];
             if (p[num_chars] == '\n') {
                 found_newline = 1;
@@ -256,33 +267,33 @@ static int readbuffer_gets(BIO *b, char *buf, int size)
      * next bio.
      */
 
-     /* Resize if we have to */
-     if (!readbuffer_resize(ctx, 1 + size))
-         return 0;
-     /*
-      * Read more data from the next bio using BIO_read_ex:
-      * Note we cannot use BIO_gets() here as it does not work on a
-      * binary stream that contains 0x00. (Since strlen() will stop at
-      * any 0x00 not at the last read '\n' in a FILE bio).
-      * Also note that some applications open and close the file bio
-      * multiple times and need to read the next available block when using
-      * stdin - so we need to READ one byte at a time!
-      */
-     p = ctx->ibuf + ctx->ibuf_off;
-     for (i = 0; i < size; ++i) {
-         j = BIO_read(b->next_bio, p, 1);
-         if (j <= 0) {
-             BIO_copy_next_retry(b);
-             *buf = '\0';
-             return num > 0 ? num : j;
-         }
-         *buf++ = *p;
-         num++;
-         ctx->ibuf_off++;
-         if (*p == '\n')
-             break;
-         ++p;
-     }
-     *buf = '\0';
-     return num;
+    /* Resize if we have to */
+    if (!readbuffer_resize(ctx, 1 + size))
+        return 0;
+    /*
+     * Read more data from the next bio using BIO_read_ex:
+     * Note we cannot use BIO_gets() here as it does not work on a
+     * binary stream that contains 0x00. (Since strlen() will stop at
+     * any 0x00 not at the last read '\n' in a FILE bio).
+     * Also note that some applications open and close the file bio
+     * multiple times and need to read the next available block when using
+     * stdin - so we need to READ one byte at a time!
+     */
+    p = ctx->ibuf + ctx->ibuf_off;
+    for (i = 0; i < size; ++i) {
+        j = BIO_read(b->next_bio, p, 1);
+        if (j <= 0) {
+            BIO_copy_next_retry(b);
+            *buf = '\0';
+            return num > 0 ? num : j;
+        }
+        *buf++ = *p;
+        num++;
+        ctx->ibuf_off++;
+        if (*p == '\n')
+            break;
+        ++p;
+    }
+    *buf = '\0';
+    return num;
 }

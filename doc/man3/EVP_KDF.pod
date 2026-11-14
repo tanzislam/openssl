@@ -5,7 +5,8 @@
 EVP_KDF, EVP_KDF_fetch, EVP_KDF_free, EVP_KDF_up_ref,
 EVP_KDF_CTX, EVP_KDF_CTX_new, EVP_KDF_CTX_free, EVP_KDF_CTX_dup,
 EVP_KDF_CTX_reset, EVP_KDF_derive,
-EVP_KDF_CTX_get_kdf_size,
+EVP_KDF_CTX_set_SKEY, EVP_KDF_derive_SKEY,
+EVP_KDF_CTX_get_kdf_size, EVP_KDF_CTX_get0_kdf, EVP_KDF_CTX_get1_kdf,
 EVP_KDF_get0_provider, EVP_KDF_CTX_kdf, EVP_KDF_is_a,
 EVP_KDF_get0_name, EVP_KDF_names_do_all, EVP_KDF_get0_description,
 EVP_KDF_CTX_get_params, EVP_KDF_CTX_set_params, EVP_KDF_do_all_provided,
@@ -20,14 +21,19 @@ EVP_KDF_CTX_gettable_params, EVP_KDF_CTX_settable_params - EVP KDF routines
  typedef struct evp_kdf_st EVP_KDF;
  typedef struct evp_kdf_ctx_st EVP_KDF_CTX;
 
- EVP_KDF_CTX *EVP_KDF_CTX_new(const EVP_KDF *kdf);
- const EVP_KDF *EVP_KDF_CTX_kdf(EVP_KDF_CTX *ctx);
+ EVP_KDF_CTX *EVP_KDF_CTX_new(EVP_KDF *kdf);
+ const EVP_KDF *EVP_KDF_CTX_get0_kdf(const EVP_KDF_CTX *ctx);
+ EVP_KDF *EVP_KDF_CTX_get1_kdf(EVP_KDF_CTX *ctx);
  void EVP_KDF_CTX_free(EVP_KDF_CTX *ctx);
  EVP_KDF_CTX *EVP_KDF_CTX_dup(const EVP_KDF_CTX *src);
  void EVP_KDF_CTX_reset(EVP_KDF_CTX *ctx);
  size_t EVP_KDF_CTX_get_kdf_size(EVP_KDF_CTX *ctx);
  int EVP_KDF_derive(EVP_KDF_CTX *ctx, unsigned char *key, size_t keylen,
                     const OSSL_PARAM params[]);
+ int EVP_KDF_CTX_set_SKEY(EVP_KDF_CTX *ctx, EVP_SKEY *key, const char *paramname);
+ EVP_SKEY *EVP_KDF_derive_SKEY(EVP_KDF_CTX *ctx, EVP_SKEYMGMT *mgmt,
+                               const char *key_type, const char *propquery,
+                               size_t keylen, const OSSL_PARAM params[]);
  int EVP_KDF_up_ref(EVP_KDF *kdf);
  void EVP_KDF_free(EVP_KDF *kdf);
  EVP_KDF *EVP_KDF_fetch(OSSL_LIB_CTX *libctx, const char *algorithm,
@@ -52,16 +58,22 @@ EVP_KDF_CTX_gettable_params, EVP_KDF_CTX_settable_params - EVP KDF routines
  const OSSL_PARAM *EVP_KDF_CTX_settable_params(const EVP_KDF *kdf);
  const OSSL_PROVIDER *EVP_KDF_get0_provider(const EVP_KDF *kdf);
 
+The following functions have been deprecated since OpenSSL 4.1,
+and can be hidden entirely by defining B<OPENSSL_API_COMPAT> with a suitable
+version value, see L<openssl_user_macros(7)>:
+
+ const EVP_KDF *EVP_KDF_CTX_kdf(const EVP_KDF_CTX *ctx);
+
 =head1 DESCRIPTION
 
 The EVP KDF routines are a high-level interface to Key Derivation Function
 algorithms and should be used instead of algorithm-specific functions.
 
 After creating a B<EVP_KDF_CTX> for the required algorithm using
-EVP_KDF_CTX_new(), inputs to the algorithm are supplied either by
-passing them as part of the EVP_KDF_derive() call or using calls
-to EVP_KDF_CTX_set_params() before calling EVP_KDF_derive() to derive
-the key.
+EVP_KDF_CTX_new(), inputs to the algorithm are supplied either by passing them
+as part of the EVP_KDF_derive() or EVP_KDF_derive_SKEY() call or using calls to
+EVP_KDF_CTX_set_params() or EVP_KDF_CTX_set_SKEY() before calling
+EVP_KDF_derive() or EVP_KDF_derive_SKEY() to derive the key.
 
 =head2 Types
 
@@ -94,8 +106,10 @@ EVP_KDF_CTX_new() creates a new context for the KDF implementation I<kdf>.
 EVP_KDF_CTX_free() frees up the context I<ctx>.  If I<ctx> is NULL, nothing
 is done.
 
-EVP_KDF_CTX_kdf() returns the B<EVP_KDF> associated with the context
-I<ctx>.
+EVP_KDF_CTX_get0_kdf() returns the B<EVP_KDF> associated with the context
+I<ctx>. EVP_KDF_CTX_get1_kdf() is the same, except ownership is passed
+to the caller.
+EVP_KDF_CTX_kdf() is an alias for EVP_KDF_CTX_get0_kdf().
 
 =head2 Computing functions
 
@@ -107,6 +121,20 @@ I<keylen> bytes of key material and places it in the I<key> buffer.
 If the algorithm produces a fixed amount of output then an error will
 occur unless the I<keylen> parameter is equal to that output size,
 as returned by EVP_KDF_CTX_get_kdf_size().
+
+EVP_KDF_derive_SKEY() behaves similarly except it returns an B<EVP_SKEY>
+object.  If the I<skeymgmt> argument is explicitly passed, it will be used for
+the generated key. If the I<skeymgmt> argument is NULL, the I<key_type> and
+I<propquery> will be used for fetching the B<EVP_SKEYMGMT> object linked to the
+key.  If the KDF doesn't support dealing with opaque keys or the passed
+B<EVP_SKEYMGMT> is from a different provider than the KDF method, the operation
+will try to perform export/import through the raw format.
+
+EVP_KDF_CTX_set_SKEY() allows setting an skey object as the input parameter for
+the derivation functions. As different KDFs may accept several parameters as
+key names, we can specify the particular parameter name we set.  If null is
+passed, the parameter B<OSSL_KDF_PARAM_KEY> is implied.  It is used when the
+input key is represented by B<EVP_SKEY> rather than raw bytes.
 
 EVP_KDF_get_params() retrieves details about the implementation
 I<kdf>.
@@ -131,26 +159,23 @@ simply ignored.
 Also, what happens when a needed parameter isn't passed down is
 defined by the implementation.
 
-EVP_KDF_gettable_params() returns an B<OSSL_PARAM> array that describes
+EVP_KDF_gettable_params() returns an L<OSSL_PARAM(3)> array that describes
 the retrievable and settable parameters.  EVP_KDF_gettable_params()
 returns parameters that can be used with EVP_KDF_get_params().
-See L<OSSL_PARAM(3)> for the use of B<OSSL_PARAM> as a parameter descriptor.
 
 EVP_KDF_gettable_ctx_params() and EVP_KDF_CTX_gettable_params()
-return constant B<OSSL_PARAM> arrays that describe the retrievable
+return constant L<OSSL_PARAM(3)> arrays that describe the retrievable
 parameters that can be used with EVP_KDF_CTX_get_params().
 EVP_KDF_gettable_ctx_params() returns the parameters that can be retrieved
 from the algorithm, whereas EVP_KDF_CTX_gettable_params() returns
 the parameters that can be retrieved in the context's current state.
-See L<OSSL_PARAM(3)> for the use of B<OSSL_PARAM> as a parameter descriptor.
 
 EVP_KDF_settable_ctx_params() and EVP_KDF_CTX_settable_params() return
-constant B<OSSL_PARAM> arrays that describe the settable parameters that
+constant L<OSSL_PARAM(3)> arrays that describe the settable parameters that
 can be used with EVP_KDF_CTX_set_params().  EVP_KDF_settable_ctx_params()
 returns the parameters that can be retrieved from the algorithm,
 whereas EVP_KDF_CTX_settable_params() returns the parameters that can
-be retrieved in the context's current state.  See L<OSSL_PARAM(3)>
-for the use of B<OSSL_PARAM> as a parameter descriptor.
+be retrieved in the context's current state.
 
 =head2 Information functions
 
@@ -194,7 +219,7 @@ For those KDF implementations that support it, this parameter sets the password.
 
 =item "salt" (B<OSSL_KDF_PARAM_SALT>) <octet string>
 
-Some KDF implementations can take a salt.
+Some KDF implementations can take a non-secret unique cryptographic salt.
 For those KDF implementations that support it, this parameter sets the salt.
 
 The default value, if any, is implementation dependent.
@@ -229,6 +254,15 @@ implementations.
 Some KDF implementations require a key.
 For those KDF implementations that support it, this octet string parameter
 sets the key.
+
+=item "info" (B<OSSL_KDF_PARAM_INFO>) <octet string>
+
+Some KDF implementations, such as L<EVP_KDF-HKDF(7)>, take an 'info' parameter
+for binding the derived key material
+to application- and context-specific information.
+This parameter sets the info, fixed info, other info or shared info argument.
+You can specify this parameter multiple times, and each instance will
+be concatenated to form the final value.
 
 =item "maclen" (B<OSSL_KDF_PARAM_MAC_SIZE>) <unsigned integer>
 
@@ -277,9 +311,9 @@ EVP_KDF_get0_name() returns the name of the KDF, or NULL on error.
 EVP_KDF_names_do_all() returns 1 if the callback was called for all names. A
 return value of 0 means that the callback was not called for any names.
 
-The remaining functions return 1 for success and 0 or a negative value for
-failure.  In particular, a return value of -2 indicates the operation is not
-supported by the KDF algorithm.
+EVP_KDF_derive_SKEY() returns the B<EVP_SKEY> object on success or NULL on failure.
+
+The remaining functions return 1 for success and 0 for failure.
 
 =head1 NOTES
 
@@ -294,11 +328,20 @@ L<life_cycle-kdf(7)>.
 
 =head1 HISTORY
 
-This functionality was added to OpenSSL 3.0.
+This functionality was added in OpenSSL 3.0.
+
+EVP_KDF_derive_SKEY() and EVP_KDF_CTX_set_SKEY() functions were introduced in
+OpenSSL 3.6.
+
+EVP_KDF_CTX_get0_kdf() and EVP_KDF_CTX_get1_kdf() functions were introduced
+in OpenSSL 4.1.
+
+EVP_KDF_CTX_kdf() function was deprecated in favour of EVP_KDF_CTX_get0_kdf()
+in OpenSSL 4.1.
 
 =head1 COPYRIGHT
 
-Copyright 2019-2021 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2019-2026 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

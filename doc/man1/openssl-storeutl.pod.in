@@ -21,19 +21,20 @@ B<openssl> B<storeutl>
 [B<-certs>]
 [B<-keys>]
 [B<-crls>]
+[B<-skeys>]
 [B<-subject> I<arg>]
 [B<-issuer> I<arg>]
 [B<-serial> I<arg>]
 [B<-alias> I<arg>]
 [B<-fingerprint> I<arg>]
 [B<-I<digest>>]
-{- $OpenSSL::safe::opt_engine_synopsis -}{- $OpenSSL::safe::opt_provider_synopsis -}
-I<uri> ...
+{- $OpenSSL::safe::opt_provider_synopsis -}
+I<uri>
 
 =head1 DESCRIPTION
 
 This command can be used to display the contents (after
-decryption as the case may be) fetched from the given URIs.
+decryption as the case may be) fetched from the given URI.
 
 =head1 OPTIONS
 
@@ -45,8 +46,11 @@ Print out a usage message.
 
 =item B<-out> I<filename>
 
-specifies the output filename to write to or standard output by
-default.
+This specifies the output file to write to.
+Standard output is used if this option is not present.
+The output file can be the same as the input,
+which leads to replacing the file contents.
+Note that file I/O is not atomic. The output file is truncated and then written.
 
 =item B<-noout>
 
@@ -72,9 +76,16 @@ Fetch objects recursively when possible.
 
 =item B<-crls>
 
-Only select the certificates, keys or CRLs from the given URI.
+=item B<-skeys>
+
+Only select the certificates, keys, CRLs or symmetric keys from the given URI.
 However, if this URI would return a set of names (URIs), those are always
 returned.
+
+Note that all options must be given before the I<uri> argument.
+
+Note I<-keys> selects exclusively private keys, there is no selector for public
+keys only.
 
 =item B<-subject> I<arg>
 
@@ -116,8 +127,6 @@ Search for an object having the given fingerprint.
 
 The digest that was used to compute the fingerprint given with B<-fingerprint>.
 
-{- $OpenSSL::safe::opt_engine_item -}
-
 {- $OpenSSL::safe::opt_provider_item -}
 
 =back
@@ -130,11 +139,13 @@ L<openssl(1)>
 
 This command was added in OpenSSL 1.1.1.
 
-The B<-engine> option was deprecated in OpenSSL 3.0.
+The B<-engine> option was removed in OpenSSL 4.0.
+
+The B<-skeys> option was added in OpenSSL 4.0
 
 =head1 COPYRIGHT
 
-Copyright 2016-2020 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2016-2025 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

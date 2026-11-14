@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2026 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -20,7 +20,7 @@
 
 #include "testutil.h"
 
-#define NUM_BITS        (BN_BITS2 * 4)
+#define NUM_BITS (BN_BITS2 * 4)
 
 #define BN_print_var(v) test_output_bignum(#v, v)
 
@@ -29,7 +29,7 @@
  * returns zero and prints debug output otherwise.
  */
 static int a_is_zero_mod_one(const char *method, const BIGNUM *r,
-                             const BIGNUM *a)
+    const BIGNUM *a)
 {
     if (!BN_is_zero(r)) {
         TEST_error("%s failed: a ** 0 mod 1 = r (should be 0)", method);
@@ -49,7 +49,8 @@ static int test_mod_exp_zero(void)
     BIGNUM *r = NULL;
     BN_ULONG one_word = 1;
     BN_CTX *ctx = BN_CTX_new();
-    int ret = 1, failed = 0;
+    int ret = 0, failed = 0;
+    BN_MONT_CTX *mont = NULL;
 
     if (!TEST_ptr(m = BN_new())
         || !TEST_ptr(a = BN_new())
@@ -94,6 +95,33 @@ static int test_mod_exp_zero(void)
     if (!TEST_true(a_is_zero_mod_one("BN_mod_exp_mont_consttime", r, a)))
         failed = 1;
 
+    if (!TEST_ptr(mont = BN_MONT_CTX_new()))
+        goto err;
+
+    ERR_set_mark();
+    /* mont is not set but passed in */
+    if (!TEST_false(BN_mod_exp_mont_consttime(r, p, a, m, ctx, mont)))
+        goto err;
+    if (!TEST_false(BN_mod_exp_mont(r, p, a, m, ctx, mont)))
+        goto err;
+    ERR_pop_to_mark();
+
+    if (!TEST_true(BN_MONT_CTX_set(mont, m, ctx)))
+        goto err;
+
+    /* we compute 0 ** a mod 1 here, to execute code that uses mont */
+    if (!TEST_true(BN_mod_exp_mont_consttime(r, p, a, m, ctx, mont)))
+        goto err;
+
+    if (!TEST_true(a_is_zero_mod_one("BN_mod_exp_mont_consttime", r, a)))
+        failed = 1;
+
+    if (!TEST_true(BN_mod_exp_mont(r, p, a, m, ctx, mont)))
+        goto err;
+
+    if (!TEST_true(a_is_zero_mod_one("BN_mod_exp_mont", r, a)))
+        failed = 1;
+
     /*
      * A different codepath exists for single word multiplication
      * in non-constant-time only.
@@ -109,11 +137,12 @@ static int test_mod_exp_zero(void)
     }
 
     ret = !failed;
- err:
+err:
     BN_free(r);
     BN_free(a);
     BN_free(p);
     BN_free(m);
+    BN_MONT_CTX_free(mont);
     BN_CTX_free(ctx);
 
     return ret;
@@ -144,25 +173,25 @@ static int test_mod_exp(int round)
         || !TEST_ptr(m = BN_new()))
         goto err;
 
-    if (!TEST_true(RAND_bytes(&c, 1)))
+    if (!TEST_int_gt(RAND_bytes(&c, 1), 0))
         goto err;
     c = (c % BN_BITS) - BN_BITS2;
     if (!TEST_true(BN_rand(a, NUM_BITS + c, BN_RAND_TOP_ONE,
-                           BN_RAND_BOTTOM_ANY)))
+            BN_RAND_BOTTOM_ANY)))
         goto err;
 
-    if (!TEST_true(RAND_bytes(&c, 1)))
+    if (!TEST_int_gt(RAND_bytes(&c, 1), 0))
         goto err;
     c = (c % BN_BITS) - BN_BITS2;
     if (!TEST_true(BN_rand(b, NUM_BITS + c, BN_RAND_TOP_ONE,
-                           BN_RAND_BOTTOM_ANY)))
+            BN_RAND_BOTTOM_ANY)))
         goto err;
 
-    if (!TEST_true(RAND_bytes(&c, 1)))
+    if (!TEST_int_gt(RAND_bytes(&c, 1), 0))
         goto err;
     c = (c % BN_BITS) - BN_BITS2;
     if (!TEST_true(BN_rand(m, NUM_BITS + c, BN_RAND_TOP_ONE,
-                           BN_RAND_BOTTOM_ODD)))
+            BN_RAND_BOTTOM_ODD)))
         goto err;
 
     if (!TEST_true(BN_mod(a, a, m, ctx))
@@ -194,7 +223,7 @@ static int test_mod_exp(int round)
     }
 
     ret = 1;
- err:
+err:
     BN_free(r_mont);
     BN_free(r_mont_const);
     BN_free(r_recp);
@@ -206,6 +235,17 @@ static int test_mod_exp(int round)
 
     return ret;
 }
+
+/*-
+ * The factor sizes are what matters; the rounds are repetition on fresh
+ * random inputs.  A defect showing on a fraction f of inputs is caught by
+ * N rounds with probability 1 - (1 - f) ^ N, so twenty catch anything
+ * affecting a seventh of inputs or more.  Rarer ones are not caught in a
+ * single run at any affordable count, and are left to the inputs being
+ * drawn afresh on every run.
+ */
+static const int factor_sizes[] = { 1024, 1536, 2048 };
+#define ROUNDS_PER_FACTOR_SIZE 20
 
 static int test_mod_exp_x2(int idx)
 {
@@ -221,13 +261,7 @@ static int test_mod_exp_x2(int idx)
     BIGNUM *a2 = NULL;
     BIGNUM *b2 = NULL;
     BIGNUM *m2 = NULL;
-    int factor_size = 0;
-
-    /*
-     * Currently only 1024-bit factor size is supported.
-     */
-    if (idx <= 100)
-        factor_size = 1024;
+    int factor_size = factor_sizes[idx / ROUNDS_PER_FACTOR_SIZE];
 
     if (!TEST_ptr(ctx = BN_CTX_new()))
         goto err;
@@ -258,8 +292,8 @@ static int test_mod_exp_x2(int idx)
         || !TEST_true(BN_mod_exp_simple(r_simple1, a1, b1, m1, ctx))
         || !TEST_true(BN_mod_exp_simple(r_simple2, a2, b2, m2, ctx))
         || !TEST_true(BN_mod_exp_mont_consttime_x2(r_mont_const_x2_1, a1, b1, m1, NULL,
-                                                   r_mont_const_x2_2, a2, b2, m2, NULL,
-                                                   ctx)))
+            r_mont_const_x2_2, a2, b2, m2, NULL,
+            ctx)))
         goto err;
 
     if (!TEST_BN_eq(r_simple1, r_mont_const_x2_1)
@@ -283,7 +317,7 @@ static int test_mod_exp_x2(int idx)
     }
 
     ret = 1;
- err:
+err:
     BN_free(r_mont_const_x2_1);
     BN_free(r_mont_const_x2_2);
     BN_free(r_simple1);
@@ -303,6 +337,7 @@ int setup_tests(void)
 {
     ADD_TEST(test_mod_exp_zero);
     ADD_ALL_TESTS(test_mod_exp, 200);
-    ADD_ALL_TESTS(test_mod_exp_x2, 100);
+    ADD_ALL_TESTS(test_mod_exp_x2,
+        OSSL_NELEM(factor_sizes) * ROUNDS_PER_FACTOR_SIZE);
     return 1;
 }

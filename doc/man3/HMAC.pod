@@ -24,9 +24,9 @@ HMAC_size
                      const unsigned char *data, size_t data_len,
                      unsigned char *md, unsigned int *md_len);
 
-Deprecated since OpenSSL 3.0, can be hidden entirely by defining
-B<OPENSSL_API_COMPAT> with a suitable version value, see
-L<openssl_user_macros(7)>:
+The following functions have been deprecated since OpenSSL 3.0, and can be
+hidden entirely by defining B<OPENSSL_API_COMPAT> with a suitable version value,
+see L<openssl_user_macros(7)>:
 
  HMAC_CTX *HMAC_CTX_new(void);
  int HMAC_CTX_reset(HMAC_CTX *ctx);
@@ -44,9 +44,9 @@ L<openssl_user_macros(7)>:
 
  size_t HMAC_size(const HMAC_CTX *e);
 
-Deprecated since OpenSSL 1.1.0, can be hidden entirely by defining
-B<OPENSSL_API_COMPAT> with a suitable version value, see
-L<openssl_user_macros(7)>:
+The following function has been deprecated since OpenSSL 1.1.0, and can be
+hidden entirely by defining B<OPENSSL_API_COMPAT> with a suitable version value,
+see L<openssl_user_macros(7)>:
 
  int HMAC_Init(HMAC_CTX *ctx, const void *key, int key_len,
                const EVP_MD *md);
@@ -71,6 +71,9 @@ I<evp_md> is a message digest such as EVP_sha1(), EVP_ripemd160() etc.
 HMAC does not support variable output length digests such as EVP_shake128() and
 EVP_shake256().
 
+HMAC() uses the default B<OSSL_LIB_CTX>.
+Use L<EVP_Q_mac(3)> instead if a library context is required.
+
 All of the functions described below are deprecated.
 Applications should instead use L<EVP_MAC_CTX_new(3)>, L<EVP_MAC_CTX_free(3)>,
 L<EVP_MAC_init(3)>, L<EVP_MAC_update(3)> and L<EVP_MAC_final(3)>
@@ -84,7 +87,7 @@ created with HMAC_CTX_new().
 
 HMAC_CTX_free() erases the key and other data from the B<HMAC_CTX>,
 releases any associated resources and finally frees the B<HMAC_CTX>
-itself.
+itself. If the argument is NULL, nothing is done.
 
 The following functions may be used if the message is not completely
 stored in memory:
@@ -92,9 +95,9 @@ stored in memory:
 HMAC_Init_ex() initializes or reuses a B<HMAC_CTX> structure to use the hash
 function I<evp_md> and key I<key>. If both are NULL, or if I<key> is NULL
 and I<evp_md> is the same as the previous call, then the
-existing key is
-reused. I<ctx> must have been created with HMAC_CTX_new() before the first use
-of an B<HMAC_CTX> in this function.
+existing key is reused. I<ctx> must have been created with HMAC_CTX_new()
+before the first use of an B<HMAC_CTX> in this function. I<impl> B<must>
+be NULL.
 
 If HMAC_Init_ex() is called with I<key> NULL and I<evp_md> is not the
 same as the previous digest used by I<ctx> then an error is returned
@@ -109,6 +112,9 @@ be authenticated (I<len> bytes at I<data>).
 
 HMAC_Final() places the message authentication code in I<md>, which
 must have space for the hash function output.
+After calling HMAC_Final() no calls to HMAC_Update() or HMAC_Final() can be
+made, but HMAC_Init_ex() can be called to initialize a new HMAC
+operation.
 
 HMAC_CTX_copy() copies all of the internal state from I<sctx> into I<dctx>.
 
@@ -160,7 +166,7 @@ OpenSSL before version 1.0.0.
 
 =head1 COPYRIGHT
 
-Copyright 2000-2021 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2000-2026 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

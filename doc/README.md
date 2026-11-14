@@ -6,10 +6,6 @@ README.md  This file
 [fingerprints.txt](fingerprints.txt)
         PGP fingerprints of authorised release signers
 
-standards.txt
-standards.txt
-        Moved to the web, <https://www.openssl.org/docs/standards.html>
-
 [HOWTO/](HOWTO/)
         A few how-to documents; not necessarily up-to-date
 
@@ -26,5 +22,9 @@ standards.txt
         Overviews; start with crypto.pod and ssl.pod, for example
         Algorithm specific EVP_PKEY documentation.
 
+Directories above should contain public information and API documentation.
+For internal documentation (like an API included with headers in
+include/internal), use [internal/](internal/) directory.
+
 Formatted versions of the manpages (apps,ssl,crypto) can be found at
-        <https://www.openssl.org/docs/manpages.html>
+        <https://docs.openssl.org/master/>

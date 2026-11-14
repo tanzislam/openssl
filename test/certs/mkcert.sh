@@ -1,6 +1,6 @@
 #! /bin/bash
 #
-# Copyright 2016-2021 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2016-2026 The OpenSSL Project Authors. All Rights Reserved.
 # Copyright (c) 2016 Viktor Dukhovni <openssl-users@dukhovni.org>.
 # All rights reserved.
 #
@@ -14,7 +14,7 @@
 
 # 100 years should be enough for now
 if [ -z "$DAYS" ]; then
-    DAYS=36525
+    DAYS=36524 # there are 24 leap years per 100 years
 fi
 
 if [ -z "$OPENSSL_SIGALG" ]; then
@@ -56,6 +56,11 @@ key() {
         dsa)  args=(-paramfile "$bits");;
         ed25519)  ;;
         ed448)  ;;
+        ML-KEM*)  ;;
+        MLKEM*)  ;;
+        ML-DSA*)  ;;
+        MLDSA*)  ;;
+        SLH-DSA*)  ;;
         *) printf "Unsupported key algorithm: %s\n" "$alg" >&2; return 1;;
         esac
         stderr_onerror \
@@ -119,11 +124,12 @@ genca() {
     local OPTIND=1
     local purpose=
 
-    while getopts p: o
+    while getopts p:c: o
     do
         case $o in
         p) purpose="$OPTARG";;
-        *) echo "Usage: $0 genca [-p EKU] cn keyname certname cakeyname cacertname" >&2
+        c) certpol="$OPTARG";;
+        *) echo "Usage: $0 genca [-p EKU][-c policyoid] cn keyname certname cakeyname cacertname" >&2
            return 1;;
         esac
     done
@@ -146,6 +152,10 @@ genca() {
     if [ -n "$NC" ]; then
         exts=$(printf "%s\nnameConstraints = %s\n" "$exts" "$NC")
     fi
+    if [ -n "$certpol" ]; then
+        exts=$(printf "%s\ncertificatePolicies = %s\n" "$exts" "$certpol")
+    fi
+
     csr=$(req "$key" "CN = $cn") || return 1
     echo "$csr" |
         cert "$cert" "$exts" -CA "${cacert}.pem" -CAkey "${cakey}.pem" \
@@ -195,6 +205,23 @@ genpc() {
 	 -set_serial 2 -days "${DAYS}"
 }
 
+geneeconfig() {
+    local key=$1; shift
+    local cert=$1; shift
+    local cakey=$1; shift
+    local ca=$1; shift
+    local conf=$1; shift
+
+    exts=$(printf "%s\n%s\n%s\n%s\n" \
+        "subjectKeyIdentifier = hash" \
+        "authorityKeyIdentifier = keyid" \
+        "basicConstraints = CA:false"; \
+        echo "$conf")
+
+    cert "$cert" "$exts" -CA "${ca}.pem" -CAkey "${cakey}.pem" \
+        -set_serial 2 -days "${DAYS}"
+}
+
 # Usage: $0 geneealt keyname certname cakeyname cacertname alt1 alt2 ...
 #
 # Note: takes csr on stdin, so must be used with $0 req like this:
@@ -206,26 +233,24 @@ geneealt() {
     local cakey=$1; shift
     local ca=$1; shift
 
-    exts=$(printf "%s\n%s\n%s\n%s\n" \
-	    "subjectKeyIdentifier = hash" \
-	    "authorityKeyIdentifier = keyid" \
-	    "basicConstraints = CA:false" \
-	    "subjectAltName = @alts";
+    conf=$(echo "subjectAltName = @alts"
            echo "[alts]";
-           for x in "$@"; do echo $x; done)
-    cert "$cert" "$exts" -CA "${ca}.pem" -CAkey "${cakey}.pem" \
-	 -set_serial 2 -days "${DAYS}"
+           for x in "$@"; do echo "$x"; done)
+
+    geneeconfig $key $cert $cakey $ca "$conf"
 }
 
 genee() {
     local OPTIND=1
     local purpose=serverAuth
+    local ku=
 
-    while getopts p: o
+    while getopts p:k: o
     do
         case $o in
         p) purpose="$OPTARG";;
-        *) echo "Usage: $0 genee [-p EKU] cn keyname certname cakeyname cacertname" >&2
+        k) ku="keyUsage = $OPTARG";;
+        *) echo "Usage: $0 genee [-k KU] [-p EKU] cn keyname certname cakeyname cacertname" >&2
            return 1;;
         esac
     done
@@ -237,10 +262,11 @@ genee() {
     local cakey=$1; shift
     local ca=$1; shift
 
-    exts=$(printf "%s\n%s\n%s\n%s\n%s\n[alts]\n%s\n" \
+    exts=$(printf "%s\n%s\n%s\n%s\n%s\n%s\n[alts]\n%s\n" \
 	    "subjectKeyIdentifier = hash" \
 	    "authorityKeyIdentifier = keyid, issuer" \
 	    "basicConstraints = CA:false" \
+            "$ku" \
 	    "extendedKeyUsage = $purpose" \
 	    "subjectAltName = @alts" "DNS=${cn}")
     csr=$(req "$key" "CN = $cn") || return 1

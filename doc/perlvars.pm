@@ -1,5 +1,5 @@
 #! /usr/bin/env perl
-# Copyright 2019-2021 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2019-2026 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -94,11 +94,14 @@ $OpenSSL::safe::opt_r_item = ""
 $OpenSSL::safe::opt_provider_synopsis = ""
 . "[B<-provider> I<name>]\n"
 . "[B<-provider-path> I<path>]\n"
+. "[B<-provparam> I<[name:]key=value>]\n"
 . "[B<-propquery> I<propq>]";
 $OpenSSL::safe::opt_provider_item = ""
 . "=item B<-provider> I<name>\n"
 . "\n"
 . "=item B<-provider-path> I<path>\n"
+. "\n"
+. "=item B<-provparam> I<[name:]key=value>\n"
 . "\n"
 . "=item B<-propquery> I<propq>\n"
 . "\n"
@@ -111,19 +114,6 @@ $OpenSSL::safe::opt_config_item = ""
 . "=item B<-config> I<configfile>\n"
 . "\n"
 . "See L<openssl(1)/Configuration Option>.";
-
-# Engine option
-$OpenSSL::safe::opt_engine_synopsis = "";
-$OpenSSL::safe::opt_engine_item = "";
-if (!$disabled{"deprecated-3.0"}) {
-  $OpenSSL::safe::opt_engine_synopsis = ""
-  . "[B<-engine> I<id>]\n";
-  $OpenSSL::safe::opt_engine_item = ""
-  . "=item B<-engine> I<id>\n"
-  . "\n"
-  . "See L<openssl(1)/Engine Options>.\n"
-  . "This option is deprecated.";
-}
 
 # Trusted certs options
 $OpenSSL::safe::opt_trust_synopsis = ""
@@ -146,14 +136,13 @@ $OpenSSL::safe::opt_versiontls_synopsis = ""
 . "[B<-no_tls1_1>]\n"
 . "[B<-no_tls1_2>]\n"
 . "[B<-no_tls1_3>]\n"
-. "[B<-ssl3>]\n"
 . "[B<-tls1>]\n"
 . "[B<-tls1_1>]\n"
 . "[B<-tls1_2>]\n"
 . "[B<-tls1_3>]";
 $OpenSSL::safe::opt_versiontls_item = ""
 . "=item B<-no_ssl3>, B<-no_tls1>, B<-no_tls1_1>, B<-no_tls1_2>, B<-no_tls1_3>,\n"
-. "B<-ssl3>, B<-tls1>, B<-tls1_1>, B<-tls1_2>, B<-tls1_3>\n"
+. "B<-tls1>, B<-tls1_1>, B<-tls1_2>, B<-tls1_3>\n"
 . "\n"
 . "See L<openssl(1)/TLS Version Options>.";
 
@@ -162,11 +151,12 @@ $OpenSSL::safe::opt_version_synopsis = ""
 . "$OpenSSL::safe::opt_versiontls_synopsis\n"
 . "[B<-dtls>]\n"
 . "[B<-dtls1>]\n"
-. "[B<-dtls1_2>]";
+. "[B<-dtls1_2>]\n"
+. "[B<-dtls1_3>]";
 $OpenSSL::safe::opt_version_item = "\n"
 . "$OpenSSL::safe::opt_versiontls_item\n"
 . "\n"
-. "=item B<-dtls>, B<-dtls1>, B<-dtls1_2>\n"
+. "=item B<-dtls>, B<-dtls1>, B<-dtls1_2>, B<-dtls1_3>\n"
 . "\n"
 . "These specify the use of DTLS instead of TLS.\n"
 . "See L<openssl(1)/TLS Version Options>.";
@@ -187,6 +177,7 @@ $OpenSSL::safe::opt_s_synopsis = ""
 . "[B<-no_legacy_server_connect>]\n"
 . "[B<-no_etm>]\n"
 . "[B<-allow_no_dhe_kex>]\n"
+. "[B<-prefer_no_dhe_kex>]\n"
 . "[B<-prioritize_chacha>]\n"
 . "[B<-strict>]\n"
 . "[B<-sigalgs> I<algs>]\n"
@@ -207,7 +198,8 @@ $OpenSSL::safe::opt_s_item = ""
 . "B<-legacy_renegotiation>, B<-no_renegotiation>,\n"
 . "B<-no_resumption_on_reneg>,\n"
 . "B<-legacy_server_connect>, B<-no_legacy_server_connect>, B<-no_etm>\n"
-. "B<-allow_no_dhe_kex>, B<-prioritize_chacha>, B<-strict>, B<-sigalgs>\n"
+. "B<-allow_no_dhe_kex>, B<-prefer_no_dhe_kex>,\n"
+. "B<-prioritize_chacha>, B<-strict>, B<-sigalgs>\n"
 . "I<algs>, B<-client_sigalgs> I<algs>, B<-groups> I<groups>, B<-curves>\n"
 . "I<curves>, B<-named_curve> I<curve>, B<-cipher> I<ciphers>, B<-ciphersuites>\n"
 . "I<1.3ciphers>, B<-min_protocol> I<minprot>, B<-max_protocol> I<maxprot>,\n"

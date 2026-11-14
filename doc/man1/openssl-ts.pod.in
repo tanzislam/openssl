@@ -7,6 +7,8 @@ openssl-ts - Time Stamping Authority command
 
 =head1 SYNOPSIS
 
+=for openssl duplicate options
+
 B<openssl> B<ts>
 B<-help>
 
@@ -41,7 +43,7 @@ B<-reply>
 [B<-out> I<response.tsr>]
 [B<-token_out>]
 [B<-text>]
-{- $OpenSSL::safe::opt_engine_synopsis -}{- $OpenSSL::safe::opt_provider_synopsis -}
+{- $OpenSSL::safe::opt_provider_synopsis -}
 
 B<openssl> B<ts>
 B<-verify>
@@ -53,7 +55,7 @@ B<-verify>
 [B<-untrusted> I<files>|I<uris>]
 [B<-CAfile> I<file>]
 [B<-CApath> I<dir>]
-[B<-CAstore> I<uri>]
+[B<-CAstore> I<filename>|I<uri>]
 {- $OpenSSL::safe::opt_v_synopsis -}
 {- $OpenSSL::safe::opt_provider_synopsis -}
 
@@ -163,9 +165,9 @@ use its own default policy. (Optional)
 =item B<-no_nonce>
 
 No nonce is specified in the request if this option is
-given. Otherwise a 64 bit long pseudo-random none is
-included in the request. It is recommended to use nonce to
-protect against replay-attacks. (Optional)
+given. Otherwise, a 64-bit long pseudo-random nonce is
+included in the request. It is recommended to use a nonce to
+protect against replay attacks. (Optional)
 
 =item B<-cert>
 
@@ -293,8 +295,6 @@ response (TimeStampResp). (Optional)
 If this option is specified the output is human-readable text format
 instead of DER. (Optional)
 
-{- $OpenSSL::safe::opt_engine_item -}
-
 {- $OpenSSL::safe::opt_provider_item -}
 
 =back
@@ -347,7 +347,7 @@ certificates as far as the response already includes them.
 Multiple sources may be given, separated by commas and/or whitespace.
 Each file may contain multiple certificates.
 
-=item B<-CAfile> I<file>, B<-CApath> I<dir>, B<-CAstore> I<uri>
+=item B<-CAfile> I<file>, B<-CApath> I<dir>, B<-CAstore> I<filename>|I<uri>
 
 See L<openssl-verification-options(1)/Trusted Certificate Options> for details.
 At least one of B<-CAfile>, B<-CApath> or B<-CAstore> must be specified.
@@ -404,13 +404,6 @@ The name of the file containing the hexadecimal serial number of the
 last timestamp response created. This number is incremented by 1 for
 each response. If the file does not exist at the time of response
 generation a new file is created with serial number 1. (Mandatory)
-
-=item B<crypto_device>
-
-Specifies the OpenSSL engine that will be set as the default for
-all available algorithms. The default value is built-in, you can specify
-any other engines supported by OpenSSL (e.g. use chil for the NCipher HSM).
-(Optional)
 
 =item B<signer_cert>
 
@@ -584,10 +577,12 @@ To verify a timestamp reply that includes the certificate chain:
         -CAfile cacert.pem
 
 To verify a timestamp token against the original data file:
+
   openssl ts -verify -data design2.txt -in design2.tsr \
         -CAfile cacert.pem
 
 To verify a timestamp token against a message imprint:
+
   openssl ts -verify -digest b7e5d3f93198b38379852f2c04e78d73abdd0f4b \
          -in design2.tsr -CAfile cacert.pem
 
@@ -637,7 +632,8 @@ seeding mechanism. The new seeding mechanism makes it unnecessary to
 define a RANDFILE for saving and restoring randomness. This option is
 retained mainly for compatibility reasons.
 
-The B<-engine> option was deprecated in OpenSSL 3.0.
+The B<-engine> option and B<crypto_device> configuration option were removed in
+OpenSSL 4.0.
 
 =head1 SEE ALSO
 
@@ -652,7 +648,7 @@ L<ossl_store-file(7)>
 
 =head1 COPYRIGHT
 
-Copyright 2006-2021 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2006-2025 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy

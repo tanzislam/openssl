@@ -7,7 +7,6 @@ BIO_set_app_data, BIO_get_app_data,
 DH_get_ex_new_index, DH_set_ex_data, DH_get_ex_data,
 DSA_get_ex_new_index, DSA_set_ex_data, DSA_get_ex_data,
 EC_KEY_get_ex_new_index, EC_KEY_set_ex_data, EC_KEY_get_ex_data,
-ENGINE_get_ex_new_index, ENGINE_set_ex_data, ENGINE_get_ex_data,
 EVP_PKEY_get_ex_new_index, EVP_PKEY_set_ex_data, EVP_PKEY_get_ex_data,
 RSA_get_ex_new_index, RSA_set_ex_data, RSA_get_ex_data,
 RSA_set_app_data, RSA_get_app_data,
@@ -43,9 +42,9 @@ X509_get_ex_new_index, X509_set_ex_data, X509_get_ex_data
  #define TYPE_set_app_data(TYPE *d, void *arg)
  #define TYPE_get_app_data(TYPE *d)
 
-Deprecated since OpenSSL 3.0, can be hidden entirely by defining
-B<OPENSSL_API_COMPAT> with a suitable version value, see
-L<openssl_user_macros(7)>:
+The following functions have been deprecated since OpenSSL 3.0, and can be
+hidden entirely by defining B<OPENSSL_API_COMPAT> with a suitable version value,
+see L<openssl_user_macros(7)>:
 
  int DH_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
                          CRYPTO_EX_dup *dup_func, CRYPTO_EX_free *free_func);
@@ -65,10 +64,6 @@ L<openssl_user_macros(7)>:
  void *RSA_get_ex_data(RSA *type, int idx);
  int RSA_set_app_data(RSA *type, void *arg);
  void *RSA_get_app_data(RSA *type);
- int ENGINE_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
-                             CRYPTO_EX_dup *dup_func, CRYPTO_EX_free *free_func);
- int ENGINE_set_ex_data(ENGINE *type, int idx, void *arg);
- void *ENGINE_get_ex_data(ENGINE *type, int idx);
 
 =head1 DESCRIPTION
 
@@ -79,9 +74,6 @@ All functions with a I<TYPE> of B<DH>, B<DSA>, B<RSA> and B<EC_KEY> are deprecat
 Applications should instead use EVP_PKEY_set_ex_data(),
 EVP_PKEY_get_ex_data() and EVP_PKEY_get_ex_new_index().
 
-All functions with a I<TYPE> of B<ENGINE> are deprecated.
-Applications using engines should be replaced by providers.
-
 These functions handle application-specific data for OpenSSL data
 structures.
 
@@ -89,10 +81,10 @@ TYPE_get_ex_new_index() is a macro that calls CRYPTO_get_ex_new_index()
 with the correct B<index> value.
 
 TYPE_set_ex_data() is a function that calls CRYPTO_set_ex_data() with
-an offset into the opaque exdata part of the TYPE object.
+an offset into the opaque exdata part of the TYPE object. I<d> B<MUST NOT> be NULL.
 
 TYPE_get_ex_data() is a function that calls CRYPTO_get_ex_data() with
-an offset into the opaque exdata part of the TYPE object.
+an offset into the opaque exdata part of the TYPE object. I<d> B<MUST NOT> be NULL.
 
 For compatibility with previous releases, the exdata index of zero is
 reserved for "application data." There are two convenience functions for
@@ -119,13 +111,12 @@ L<CRYPTO_get_ex_new_index(3)>.
 The functions DH_get_ex_new_index(), DH_set_ex_data(), DH_get_ex_data(),
 DSA_get_ex_new_index(), DSA_set_ex_data(), DSA_get_ex_data(),
 EC_KEY_get_ex_new_index(), EC_KEY_set_ex_data(), EC_KEY_get_ex_data(),
-ENGINE_get_ex_new_index(), ENGINE_set_ex_data(), ENGINE_get_ex_data(),
 RSA_get_ex_new_index(), RSA_set_ex_data(), RSA_get_ex_data(),
 RSA_set_app_data() and RSA_get_app_data() were deprecated in OpenSSL 3.0.
 
 =head1 COPYRIGHT
 
-Copyright 2015-2021 The OpenSSL Project Authors. All Rights Reserved.
+Copyright 2015-2025 The OpenSSL Project Authors. All Rights Reserved.
 
 Licensed under the Apache License 2.0 (the "License").  You may not use
 this file except in compliance with the License.  You can obtain a copy
